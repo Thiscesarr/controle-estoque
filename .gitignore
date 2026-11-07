@@ -1,0 +1,24 @@
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+
+# Metadados gerados pela instalação do pacote
+*.egg-info/
+build/
+dist/
+
+# Caches das ferramentas de teste e lint
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.coverage
+
+# Banco de dados local (gerado ao rodar a aplicação)
+*.db
+
+# Editores
+.vscode/
+.idea/
