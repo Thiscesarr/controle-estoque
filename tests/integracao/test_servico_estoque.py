@@ -279,6 +279,37 @@ class TestEfetivacao:
         )
 
 
+class TestBaixaDeBloqueio:
+    def test_baixar_tira_as_unidades_bloqueadas_do_estoque(self, servico, sku_com_estoque) -> None:
+        bloqueio = servico.bloquear(sku_com_estoque, 2, "INS-1", motivo="caixa avariada")
+        assert saldo(servico) == (10, 8, 0, 2)
+
+        baixado = servico.baixar_bloqueio(bloqueio.id)
+
+        assert baixado.status == StatusRetencao.EFETIVADA
+        assert saldo(servico) == (8, 8, 0, 0)  # o disponível não muda
+        ultima = servico.listar_movimentacoes(sku_com_estoque)[-1]
+        assert (ultima.tipo, ultima.quantidade) == (TipoMovimentacao.BAIXA_BLOQUEIO, 2)
+
+    def test_bloqueio_baixado_nao_pode_ser_liberado_nem_baixado_de_novo(
+        self, servico, sku_com_estoque
+    ) -> None:
+        bloqueio = servico.bloquear(sku_com_estoque, 2, "INS-1")
+        servico.baixar_bloqueio(bloqueio.id)
+
+        with pytest.raises(RetencaoJaEfetivada):
+            servico.liberar_bloqueio(bloqueio.id)
+        with pytest.raises(RetencaoJaEfetivada):
+            servico.baixar_bloqueio(bloqueio.id)
+        assert saldo(servico) == (8, 8, 0, 0)
+
+    def test_reserva_nao_pode_ser_baixada_como_bloqueio(self, servico, sku_com_estoque) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        with pytest.raises(RetencaoNaoEncontrada):
+            servico.baixar_bloqueio(reserva.id)
+        assert saldo(servico) == (10, 7, 3, 0)
+
+
 class TestMovimentacoes:
     def test_cada_operacao_gera_um_registro_no_historico(self, servico, sku_com_estoque) -> None:
         reserva = servico.reservar(sku_com_estoque, 3, "PED-1")

@@ -110,17 +110,29 @@ class MaquinaDeEstoque(RuleBasedStateMachine):
 
     @rule(retencao_id=retencoes)
     def efetivar(self, retencao_id: str) -> None:
-        if self.tipo_por_id[retencao_id] == TipoRetencao.BLOQUEIO:
-            with pytest.raises(RetencaoNaoEncontrada):  # bloqueio não é reserva
-                self.servico.efetivar_reserva(retencao_id)
-        elif retencao_id in self.ativas:
-            self.servico.efetivar_reserva(retencao_id)
+        """Reserva entregue ou bloqueio baixado: as unidades retidas saem do estoque."""
+        if self.tipo_por_id[retencao_id] == TipoRetencao.RESERVA:
+            operacao, operacao_do_outro_tipo = (
+                self.servico.efetivar_reserva,
+                self.servico.baixar_bloqueio,
+            )
+        else:
+            operacao, operacao_do_outro_tipo = (
+                self.servico.baixar_bloqueio,
+                self.servico.efetivar_reserva,
+            )
+
+        with pytest.raises(RetencaoNaoEncontrada):  # rota do outro tipo nunca encontra
+            operacao_do_outro_tipo(retencao_id)
+
+        if retencao_id in self.ativas:
+            operacao(retencao_id)
             _, quantidade = self.ativas.pop(retencao_id)
-            self.total -= quantidade  # as unidades reservadas saíram do estoque
+            self.total -= quantidade
             self.encerradas[retencao_id] = StatusRetencao.EFETIVADA
         else:
             with pytest.raises(self._erro_esperado(retencao_id)):
-                self.servico.efetivar_reserva(retencao_id)
+                operacao(retencao_id)
 
     def _erro_esperado(self, retencao_id: str) -> type[Exception]:
         if self.encerradas[retencao_id] == StatusRetencao.LIBERADA:

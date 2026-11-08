@@ -245,6 +245,19 @@ class TestStatusHttp:
             assert resposta.status_code == 409
             assert resposta.json()["codigo"] == "RETENCAO_JA_EFETIVADA"
 
+    def test_baixar_bloqueio(self, cliente: TestClient) -> None:
+        cadastrar(cliente)
+        bloqueio_id = cliente.post(
+            "/produtos/NB-001/bloqueios", json={"quantidade": 2, "solicitacao_id": "INS-1"}
+        ).json()["id"]
+
+        resposta = cliente.post(f"/bloqueios/{bloqueio_id}/baixar")
+
+        assert resposta.status_code == 200
+        assert resposta.json()["status"] == "EFETIVADA"
+        assert quantidades(cliente)["quantidade_total"] == 8
+        assert cliente.post(f"/bloqueios/{bloqueio_id}/baixar").status_code == 409
+
     def test_reserva_inexistente_responde_404(self, cliente: TestClient) -> None:
         assert cliente.get("/reservas/nao-existe").status_code == 404
         assert cliente.post("/reservas/nao-existe/liberar").status_code == 404

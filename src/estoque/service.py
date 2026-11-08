@@ -39,6 +39,10 @@ _MOVIMENTACAO_AO_LIBERAR = {
     TipoRetencao.RESERVA: TipoMovimentacao.LIBERACAO_RESERVA,
     TipoRetencao.BLOQUEIO: TipoMovimentacao.LIBERACAO_BLOQUEIO,
 }
+_MOVIMENTACAO_AO_EFETIVAR = {
+    TipoRetencao.RESERVA: TipoMovimentacao.EFETIVACAO_RESERVA,
+    TipoRetencao.BLOQUEIO: TipoMovimentacao.BAIXA_BLOQUEIO,
+}
 
 
 def _agora_utc() -> datetime:
@@ -141,18 +145,26 @@ class ServicoEstoque:
         return self._liberar(TipoRetencao.BLOQUEIO, bloqueio_id)
 
     def efetivar_reserva(self, reserva_id: str) -> Retencao:
-        """Entrega do pedido: as unidades reservadas saem do estoque numa única transação.
+        """Entrega do pedido: as unidades reservadas saem do estoque."""
+        return self._efetivar(TipoRetencao.RESERVA, reserva_id)
 
-        O total cai e o reservado cai na mesma quantidade, então o disponível não muda.
-        Fazer isso em uma operação só evita a brecha de "liberar e depois dar saída", em que
-        outra requisição poderia usar as unidades no intervalo entre as duas chamadas.
+    def baixar_bloqueio(self, bloqueio_id: str) -> Retencao:
+        """Perda definitiva (ex.: avaria): as unidades bloqueadas saem do estoque."""
+        return self._efetivar(TipoRetencao.BLOQUEIO, bloqueio_id)
+
+    def _efetivar(self, tipo: TipoRetencao, retencao_id: str) -> Retencao:
+        """As unidades retidas saem do estoque numa única transação.
+
+        O total e o retido caem na mesma quantidade, então o disponível não muda. Fazer isso
+        em uma operação só evita a brecha de "liberar e depois dar saída", em que outra
+        requisição poderia usar as unidades no intervalo entre as duas chamadas.
         """
         with self._banco.escrita() as conexao:
             repositorio = RepositorioEstoque(conexao)
-            reserva = self._buscar_retencao(repositorio, TipoRetencao.RESERVA, reserva_id)
+            retencao = self._buscar_retencao(repositorio, tipo, retencao_id)
 
             agora = self._relogio()
-            efetivada = reserva.efetivar(agora)  # já liberada/efetivada -> erro 409
+            efetivada = retencao.efetivar(agora)  # já liberada/efetivada -> erro 409
             saldo = self._situacao(repositorio, efetivada.sku).saldo
             repositorio.atualizar_total(
                 efetivada.sku, saldo.quantidade_total - efetivada.quantidade
@@ -160,7 +172,7 @@ class ServicoEstoque:
             repositorio.atualizar_retencao(efetivada)
             repositorio.registrar_movimentacao(
                 efetivada.sku,
-                TipoMovimentacao.EFETIVACAO_RESERVA,
+                _MOVIMENTACAO_AO_EFETIVAR[tipo],
                 efetivada.quantidade,
                 agora,
                 efetivada.id,

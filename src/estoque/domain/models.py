@@ -88,7 +88,7 @@ class StatusRetencao(StrEnum):
     """Ciclo de vida de uma retenção: nasce ativa e é encerrada uma única vez.
 
     LIBERADA: as unidades voltaram ao disponível.
-    EFETIVADA: as unidades reservadas saíram do estoque (pedido entregue). Só para reservas.
+    EFETIVADA: as unidades saíram do estoque (reserva entregue ou bloqueio baixado por perda).
     """
 
     ATIVA = "ATIVA"
@@ -106,6 +106,7 @@ class TipoMovimentacao(StrEnum):
     LIBERACAO_RESERVA = "LIBERACAO_RESERVA"
     LIBERACAO_BLOQUEIO = "LIBERACAO_BLOQUEIO"
     EFETIVACAO_RESERVA = "EFETIVACAO_RESERVA"
+    BAIXA_BLOQUEIO = "BAIXA_BLOQUEIO"
 
 
 @dataclass(frozen=True)
@@ -184,9 +185,9 @@ class Retencao:
         return replace(self, status=StatusRetencao.LIBERADA, liberada_em=em)
 
     def efetivar(self, em: datetime) -> "Retencao":
-        """Devolve uma NOVA reserva, efetivada no instante `em` (as unidades saíram).
+        """Devolve uma NOVA retenção, efetivada no instante `em`: as unidades saíram do estoque.
 
-        Quem garante que só reservas são efetivadas é o serviço, que busca a retenção pelo tipo.
+        Para uma reserva, é a entrega do pedido; para um bloqueio, a baixa por perda.
         """
         self._garantir_ativa()
         return replace(self, status=StatusRetencao.EFETIVADA, efetivada_em=em)

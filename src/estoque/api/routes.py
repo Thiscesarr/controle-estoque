@@ -184,6 +184,16 @@ def liberar_bloqueio(bloqueio_id: str, servico: Servico) -> RetencaoResposta:
     return RetencaoResposta.de_dominio(servico.liberar_bloqueio(bloqueio_id))
 
 
+@router.post(
+    "/bloqueios/{bloqueio_id}/baixar",
+    tags=["Bloqueios"],
+    summary="Baixar um bloqueio (perda definitiva: as unidades saem do estoque)",
+    responses=_erros(404, 409),
+)
+def baixar_bloqueio(bloqueio_id: str, servico: Servico) -> RetencaoResposta:
+    return RetencaoResposta.de_dominio(servico.baixar_bloqueio(bloqueio_id))
+
+
 # --------------------------------------------------------------------- saúde
 
 
