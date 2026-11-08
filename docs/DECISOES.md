@@ -78,13 +78,13 @@ decisão tem custo.
   inspeção...). O id da retenção é único; o `solicitacao_id` pode se repetir.
 - **Consequências:** permite rastrear por que cada unidade está retida.
 
-## 7. Liberar muda o status (e não apaga o registro)
+## 7. Liberar e efetivar mudam o status (e não apagam o registro)
 
 - **Alternativas:** `DELETE` da reserva/bloqueio.
-- **Decisão:** a retenção passa de `ATIVA` para `LIBERADA` (com data); só as ativas entram
-  no cálculo.
+- **Decisão:** a retenção passa de `ATIVA` para `LIBERADA` ou `EFETIVADA` (com data), uma
+  única vez; só as ativas entram no cálculo.
 - **Por quê:** preserva o histórico e permite respostas precisas: id que nunca existiu → 404;
-  id já liberado → 409. Com `DELETE`, os dois casos seriam iguais.
+  id já liberado ou efetivado → 409. Com `DELETE`, os casos seriam iguais.
 - **Consequências:** a tabela cresce com o tempo (em produção: arquivamento).
 
 ## 8. Rotas de ação: `POST /reservas/{id}/liberar`
@@ -143,7 +143,9 @@ decisão tem custo.
   mapa (`api/app.py`).
 - **Por quê:** quem chama identifica o erro pelo tipo, não pelo texto. O domínio não sabe que
   existe HTTP, então as regras servem para outros canais (fila, CLI). O formato
-  `{"codigo", "mensagem"}` é o mesmo para erros de negócio e de validação.
+  `{"codigo", "mensagem"}` é o mesmo para erros de negócio, de validação e de rota (404 de
+  rota inexistente e 405 de método errado, que o framework geraria no formato dele,
+  `{"detail"}`; ver decisão 20).
 
 ## 13. Validação em duas camadas
 
@@ -184,3 +186,35 @@ decisão tem custo.
 - **Por quê:** cada nível pega um tipo de erro diferente. Os testes de concorrência e de
   propriedades cobrem o que exemplos escritos à mão não alcançam. A mutação provou que os
   testes de concorrência detectam a ausência de controle de concorrência.
+
+## 18. Efetivação atômica da reserva
+
+- **Contexto:** a versão inicial só tinha "liberar". Para entregar um pedido reservado, era
+  preciso liberar a reserva e depois registrar a saída, em duas chamadas. Entre elas, outra
+  requisição podia reservar ou retirar as mesmas unidades.
+- **Alternativas:** manter as duas chamadas e documentar a brecha; ou uma operação única.
+- **Decisão:** `POST /reservas/{id}/efetivar`. Numa única transação, baixa o total, marca a
+  reserva como `EFETIVADA` e grava a movimentação `EFETIVACAO_RESERVA`. O disponível não muda
+  (as unidades já estavam fora dele).
+- **Por quê:** a operação de negócio "entregar o pedido" precisa ser atômica, do mesmo jeito
+  que as outras. Só reservas podem ser efetivadas; um id de bloqueio responde 404.
+- **Evidência:** teste de concorrência com 10 liberações e 10 efetivações simultâneas da mesma
+  reserva: só uma vence, e o saldo final corresponde a ela.
+
+## 19. SKU sem diferença entre maiúsculas e minúsculas
+
+- **Contexto:** a versão inicial tratava `nb-001` e `NB-001` como produtos diferentes.
+- **Decisão:** o SKU é normalizado para maiúsculas no cadastro e em todas as buscas
+  (`normalizar_sku` em `models.py`). Só textos ASCII são convertidos, para que um caractere
+  especial nunca vire outro SKU válido ao passar por `upper()`.
+- **Por quê:** evita cadastro duplicado do mesmo produto e estoque dividido entre dois
+  registros.
+
+## 20. Contrato único de erro também para erros de rota
+
+- **Contexto:** os testes da API mostraram que rota inexistente (404) e método errado (405)
+  respondiam `{"detail": ...}`, formato padrão do FastAPI, diferente do resto da API.
+- **Decisão:** um tratador para `HTTPException` em `api/app.py` converte esses erros para
+  `{"codigo", "mensagem"}` (`ROTA_NAO_ENCONTRADA`, `METODO_NAO_PERMITIDO`), mantendo os
+  cabeçalhos originais (no 405, o `Allow` com os métodos aceitos).
+- **Por quê:** o cliente da API trata qualquer erro lendo sempre os mesmos campos.
