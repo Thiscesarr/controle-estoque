@@ -17,7 +17,7 @@ from tests.apoio import INSTANTE_FIXO, SKU
 
 @pytest.fixture
 def banco(tmp_path: Path) -> BancoDeDados:
-    banco = BancoDeDados(tmp_path / "estoque.db")
+    banco = BancoDeDados(tmp_path / "estoque.db", sincronizar_disco=False)
     banco.criar_schema()
     return banco
 

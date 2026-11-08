@@ -51,14 +51,19 @@ CREATE INDEX IF NOT EXISTS idx_movimentacoes_sku ON movimentacoes (sku, id);
 class BancoDeDados:
     """Sabe onde está o arquivo do banco e entrega conexões já dentro de uma transação."""
 
-    def __init__(self, caminho: str | Path) -> None:
+    def __init__(self, caminho: str | Path, sincronizar_disco: bool = True) -> None:
+        """
+        `sincronizar_disco=False` é só para testes: o SQLite deixa de esperar a confirmação
+        de gravação física no disco (fsync) a cada commit. Transações, rollback e locks
+        continuam funcionando igual; muda apenas a proteção contra queda de energia, que não
+        importa para um banco descartado ao fim de cada teste.
+        """
         self._caminho = str(caminho)
+        self._sincronizar_disco = sincronizar_disco
 
     def criar_schema(self) -> None:
         """Cria as tabelas, se ainda não existirem. Pode ser chamado várias vezes."""
         with self._conexao() as conexao:
-            # WAL: leitores não bloqueiam o escritor (e vice-versa). Fica gravado no arquivo.
-            conexao.execute("PRAGMA journal_mode = WAL")
             conexao.executescript(SCHEMA)
 
     @contextmanager
@@ -101,6 +106,8 @@ class BancoDeDados:
         try:
             conexao.row_factory = sqlite3.Row  # permite ler colunas pelo nome: linha["sku"]
             conexao.execute("PRAGMA foreign_keys = ON")  # o SQLite vem com isso desligado
+            if not self._sincronizar_disco:
+                conexao.execute("PRAGMA synchronous = OFF")
             yield conexao
         finally:
             # Atenção: usar `with sqlite3.connect(...)` NÃO fecha a conexão, só faz commit.

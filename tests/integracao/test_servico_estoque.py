@@ -256,6 +256,8 @@ class TestConsistenciaEPersistencia:
         servico.reservar(sku_com_estoque, 3, "PED-1")
 
         # Mesmo arquivo usado pela fixture `banco`, mas aberto do zero (como num reinício).
-        novo_servico = ServicoEstoque(BancoDeDados(tmp_path / "estoque.db"))
+        novo_servico = ServicoEstoque(
+            BancoDeDados(tmp_path / "estoque.db", sincronizar_disco=False)
+        )
 
         assert saldo(novo_servico) == (10, 7, 3, 0)

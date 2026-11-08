@@ -16,10 +16,9 @@ dist/
 .ruff_cache/
 .coverage
 
-# Banco de dados local (gerado ao rodar a aplicação) e arquivos auxiliares do modo WAL
+# Banco de dados local (gerado ao rodar a aplicação) e seu arquivo temporário de journal
 *.db
-*.db-wal
-*.db-shm
+*.db-journal
 
 # Editores
 .vscode/
