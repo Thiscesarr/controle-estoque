@@ -22,14 +22,24 @@ class ErroDominio(Exception):
         self.mensagem = mensagem
 
 
+class DadoInvalido(ErroDominio):
+    """Um campo informado não respeita o formato esperado (ex.: SKU com espaço)."""
+
+    codigo = "DADO_INVALIDO"
+
+    def __init__(self, campo: str, detalhe: str) -> None:
+        super().__init__(f"Campo '{campo}' inválido: {detalhe}")
+        self.campo = campo
+
+
 class QuantidadeInvalida(ErroDominio):
-    """A quantidade informada não é um número inteiro maior que zero."""
+    """A quantidade informada não é um número inteiro dentro do intervalo aceito."""
 
     codigo = "QUANTIDADE_INVALIDA"
 
-    def __init__(self, quantidade: object) -> None:
+    def __init__(self, quantidade: object, maximo: int) -> None:
         super().__init__(
-            f"A quantidade deve ser um inteiro maior que zero (recebido: {quantidade!r})"
+            f"A quantidade deve ser um número inteiro entre 1 e {maximo} (recebido: {quantidade!r})"
         )
         self.quantidade = quantidade
 

@@ -1,26 +1,70 @@
 """Modelos do domínio de estoque.
 
-Este módulo descreve O QUE existe no negócio (o produto, as retenções e o saldo) e as
-regras que dependem só desses dados (ex.: "não reservar mais do que o disponível").
-Ele não sabe nada de banco de dados nem de HTTP.
+Este módulo descreve O QUE existe no negócio (o produto, o saldo, as retenções e o
+histórico de movimentações) e as regras que dependem só desses dados (ex.: "não reservar
+mais do que o disponível"). Ele não sabe nada de banco de dados nem de HTTP.
 """
 
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
-from estoque.domain.errors import QuantidadeIndisponivel, QuantidadeInvalida, RetencaoJaLiberada
+from estoque.domain.errors import (
+    DadoInvalido,
+    QuantidadeIndisponivel,
+    QuantidadeInvalida,
+    RetencaoJaLiberada,
+)
+
+QUANTIDADE_MAXIMA_POR_OPERACAO = 1_000_000
+"""Limite de unidades em uma única operação.
+
+Protege contra erros de digitação (ex.: 1000000 no lugar de 100) e mantém os totais longe
+do limite de inteiros de 64 bits do banco de dados.
+"""
+
+PADRAO_SKU = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$"
+"""SKU: de 1 a 50 caracteres, começando por letra ou número; aceita '.', '-' e '_'.
+
+O SKU faz parte da URL (/produtos/{sku}), por isso espaços e barras não são aceitos.
+"""
+
+TAMANHO_MAXIMO_TEXTO = 200
 
 
 def validar_quantidade(quantidade: object) -> int:
-    """Garante que a quantidade de uma operação é um inteiro maior que zero.
+    """Garante que a quantidade de uma operação é um inteiro entre 1 e o limite.
 
     `bool` é rejeitado de propósito: em Python, `True` é um `int` que vale 1, e aceitar
     `True` como "1 unidade" esconderia um erro de quem chamou.
     """
-    if isinstance(quantidade, bool) or not isinstance(quantidade, int) or quantidade <= 0:
-        raise QuantidadeInvalida(quantidade)
+    if (
+        isinstance(quantidade, bool)
+        or not isinstance(quantidade, int)
+        or not 1 <= quantidade <= QUANTIDADE_MAXIMA_POR_OPERACAO
+    ):
+        raise QuantidadeInvalida(quantidade, QUANTIDADE_MAXIMA_POR_OPERACAO)
     return quantidade
+
+
+def validar_sku(sku: object) -> str:
+    """Garante que o SKU segue o formato aceito (ver `PADRAO_SKU`)."""
+    if not isinstance(sku, str) or re.fullmatch(PADRAO_SKU, sku) is None:
+        raise DadoInvalido("sku", "use de 1 a 50 caracteres entre letras, números, '.', '-' e '_'")
+    return sku
+
+
+def validar_texto(valor: object, campo: str) -> str:
+    """Texto obrigatório: remove espaços das pontas, não pode ficar vazio nem ser longo demais."""
+    if not isinstance(valor, str):
+        raise DadoInvalido(campo, "deve ser um texto")
+    texto = valor.strip()
+    if not texto:
+        raise DadoInvalido(campo, "não pode ser vazio")
+    if len(texto) > TAMANHO_MAXIMO_TEXTO:
+        raise DadoInvalido(campo, f"deve ter no máximo {TAMANHO_MAXIMO_TEXTO} caracteres")
+    return texto
 
 
 class TipoRetencao(StrEnum):
@@ -37,18 +81,55 @@ class StatusRetencao(StrEnum):
     LIBERADA = "LIBERADA"
 
 
+class TipoMovimentacao(StrEnum):
+    """Tudo o que pode acontecer com o estoque de um produto (trilha de auditoria)."""
+
+    ENTRADA = "ENTRADA"
+    SAIDA = "SAIDA"
+    RESERVA = "RESERVA"
+    BLOQUEIO = "BLOQUEIO"
+    LIBERACAO_RESERVA = "LIBERACAO_RESERVA"
+    LIBERACAO_BLOQUEIO = "LIBERACAO_BLOQUEIO"
+
+
 @dataclass(frozen=True)
 class Produto:
-    """Um produto do estoque.
-
-    Guardamos apenas a quantidade total (unidades fisicamente no estoque). As quantidades
-    reservada, bloqueada e disponível são calculadas a partir das retenções ativas, para
-    que não exista um número guardado que possa divergir dos demais.
-    """
+    """Dados de cadastro de um produto: o que ele é (as quantidades ficam no saldo)."""
 
     sku: str
     nome: str
-    quantidade_total: int = 0
+
+
+@dataclass(frozen=True)
+class SaldoEstoque:
+    """Retrato das quantidades de um produto em um determinado momento.
+
+    Só o total é guardado no banco. O reservado e o bloqueado são somados a partir das
+    retenções ativas, e o disponível é calculado aqui. Assim não existe um número
+    guardado que possa divergir dos demais.
+    """
+
+    quantidade_total: int
+    quantidade_reservada: int
+    quantidade_bloqueada: int
+
+    @property
+    def quantidade_disponivel(self) -> int:
+        """O disponível é sempre derivado: total menos tudo que está retido."""
+        return self.quantidade_total - self.quantidade_reservada - self.quantidade_bloqueada
+
+    def garantir_disponivel(self, quantidade: int) -> None:
+        """Regra comum a saída, reserva e bloqueio: só se usa o que está disponível."""
+        if quantidade > self.quantidade_disponivel:
+            raise QuantidadeIndisponivel(quantidade, self.quantidade_disponivel)
+
+
+@dataclass(frozen=True)
+class SituacaoProduto:
+    """Resultado da operação Consultar: o produto e o seu saldo, lidos no mesmo instante."""
+
+    produto: Produto
+    saldo: SaldoEstoque
 
 
 @dataclass(frozen=True)
@@ -64,7 +145,7 @@ class Retencao:
     sku: str  # produto ao qual a retenção pertence
     tipo: TipoRetencao
     quantidade: int
-    solicitacao_id: str  # solicitação/pedido que originou a retenção
+    solicitacao_id: str  # solicitação/pedido que originou a retenção (pode se repetir)
     status: StatusRetencao
     criada_em: datetime
     motivo: str | None = None  # texto livre opcional (ex.: "caixa avariada")
@@ -88,19 +169,12 @@ class Retencao:
 
 
 @dataclass(frozen=True)
-class SaldoEstoque:
-    """Retrato das quantidades de um produto em um determinado momento."""
+class Movimentacao:
+    """Registro imutável de algo que aconteceu com o estoque de um produto."""
 
-    quantidade_total: int
-    quantidade_reservada: int
-    quantidade_bloqueada: int
-
-    @property
-    def quantidade_disponivel(self) -> int:
-        """O disponível é sempre derivado: total menos tudo que está retido."""
-        return self.quantidade_total - self.quantidade_reservada - self.quantidade_bloqueada
-
-    def garantir_disponivel(self, quantidade: int) -> None:
-        """Regra comum a saída, reserva e bloqueio: só se usa o que está disponível."""
-        if quantidade > self.quantidade_disponivel:
-            raise QuantidadeIndisponivel(quantidade, self.quantidade_disponivel)
+    id: int
+    sku: str
+    tipo: TipoMovimentacao
+    quantidade: int
+    ocorrida_em: datetime
+    retencao_id: str | None = None  # preenchido em reservas, bloqueios e liberações
