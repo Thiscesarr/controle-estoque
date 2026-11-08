@@ -1,0 +1,37 @@
+# Integração contínua: a cada push ou pull request, o GitHub instala o projeto do zero,
+# verifica estilo/lint e roda todos os testes em duas versões do Python.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # A menor versão suportada (pyproject.toml) e uma versão recente.
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Instalar o projeto e as ferramentas de desenvolvimento
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Formatação (ruff format)
+        run: ruff format --check .
+
+      - name: Testes com cobertura
+        run: pytest --cov=estoque --cov-report=term-missing
