@@ -4,8 +4,14 @@ As regras de negócio já são cobertas nos testes de integração do serviço. 
 a tradução para HTTP: o status certo para cada situação e o formato de resposta prometido.
 """
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
+
+from estoque.api.app import criar_app
+from estoque.repository import RepositorioEstoque
 
 
 def cadastrar(cliente: TestClient, sku: str = "NB-001", estoque: int = 10) -> str:
@@ -116,6 +122,49 @@ class TestErrosDeRoteamento:
         assert resposta.status_code == 405
         assert resposta.json()["codigo"] == "METODO_NAO_PERMITIDO"
         assert resposta.headers["allow"] == "POST"
+
+
+class TestErrosDeInfraestrutura:
+    """Falhas fora das regras de negócio também respeitam o contrato e não alteram o estoque."""
+
+    def test_banco_ocupado_responde_503_com_retry_after(
+        self, cliente: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cadastrar(cliente)
+        monkeypatch.setattr("estoque.db.TEMPO_ESPERA_LOCK_SEGUNDOS", 0.2)
+        outra_escrita = sqlite3.connect(tmp_path / "api.db", isolation_level=None)
+        outra_escrita.execute("BEGIN IMMEDIATE")  # segura o lock de escrita
+        try:
+            resposta = cliente.post("/produtos/NB-001/entradas", json={"quantidade": 1})
+        finally:
+            outra_escrita.execute("ROLLBACK")
+            outra_escrita.close()
+
+        assert resposta.status_code == 503
+        assert resposta.headers["retry-after"] == "1"
+        assert resposta.json()["codigo"] == "BANCO_OCUPADO"
+        assert quantidades(cliente)["quantidade_total"] == 10
+
+    def test_erro_inesperado_responde_500_no_contrato_sem_alterar_o_estoque(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def falhar(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("falha simulada")
+
+        app = criar_app(tmp_path / "falha.db", sincronizar_disco=False)
+        with TestClient(app, raise_server_exceptions=False) as cliente:
+            cadastrar(cliente)
+            monkeypatch.setattr(RepositorioEstoque, "registrar_movimentacao", falhar)
+
+            resposta = cliente.post("/produtos/NB-001/entradas", json={"quantidade": 5})
+
+            monkeypatch.undo()
+            assert resposta.status_code == 500
+            assert resposta.json() == {
+                "codigo": "ERRO_INTERNO",
+                "mensagem": "Erro interno inesperado",
+            }
+            assert quantidades(cliente)["quantidade_total"] == 10
 
 
 class TestStatusHttp:

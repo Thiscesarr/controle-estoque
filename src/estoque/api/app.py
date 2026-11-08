@@ -4,7 +4,9 @@
 para ter uma aplicação com um banco temporário próprio.
 """
 
+import logging
 import os
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,6 +33,9 @@ from estoque.domain.errors import (
 from estoque.service import ServicoEstoque
 
 CAMINHO_BANCO_PADRAO = "estoque.db"
+SEGUNDOS_PARA_NOVA_TENTATIVA = "1"
+
+logger = logging.getLogger("estoque")
 
 # Único lugar que sabe qual erro de negócio vira qual status HTTP.
 STATUS_HTTP_POR_ERRO: dict[type[ErroDominio], int] = {
@@ -80,6 +85,8 @@ def criar_app(caminho_banco: str | Path | None = None, sincronizar_disco: bool =
     app.add_exception_handler(ErroDominio, _tratar_erro_de_dominio)
     app.add_exception_handler(RequestValidationError, _tratar_requisicao_invalida)
     app.add_exception_handler(StarletteHTTPException, _tratar_erro_http)
+    app.add_exception_handler(sqlite3.OperationalError, _tratar_erro_de_banco)
+    app.add_exception_handler(Exception, _tratar_erro_inesperado)
     return app
 
 
@@ -115,4 +122,29 @@ async def _tratar_erro_http(request: Request, erro: StarletteHTTPException) -> J
         status_code=erro.status_code,
         content={"codigo": codigo, "mensagem": mensagem},
         headers=erro.headers,
+    )
+
+
+async def _tratar_erro_de_banco(request: Request, erro: sqlite3.OperationalError) -> JSONResponse:
+    """Banco ocupado além do tempo de espera vira 503: a operação não foi aplicada e pode
+    ser repetida. Qualquer outro erro operacional do banco é tratado como erro interno."""
+    if "locked" not in str(erro).lower():
+        return await _tratar_erro_inesperado(request, erro)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "codigo": "BANCO_OCUPADO",
+            "mensagem": "Banco ocupado por outras operações; tente novamente",
+        },
+        headers={"Retry-After": SEGUNDOS_PARA_NOVA_TENTATIVA},
+    )
+
+
+async def _tratar_erro_inesperado(request: Request, erro: Exception) -> JSONResponse:
+    """Erro não previsto: registra o detalhe no log e responde no contrato da API, sem expor
+    a mensagem interna ao cliente."""
+    logger.error("Erro inesperado em %s %s", request.method, request.url.path, exc_info=erro)
+    return JSONResponse(
+        status_code=500,
+        content={"codigo": "ERRO_INTERNO", "mensagem": "Erro interno inesperado"},
     )
