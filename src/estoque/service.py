@@ -132,6 +132,20 @@ class ServicoEstoque:
     ) -> Retencao:
         return self._reter(TipoRetencao.BLOQUEIO, sku, quantidade, solicitacao_id, motivo)
 
+    def listar_retencoes(
+        self,
+        sku: str,
+        tipo: TipoRetencao | None = None,
+        status: StatusRetencao | None = None,
+        solicitacao_id: str | None = None,
+    ) -> list[Retencao]:
+        """Reservas e bloqueios do produto, filtráveis (ex.: as ativas de uma solicitação)."""
+        sku = normalizar_sku(sku)
+        with self._banco.leitura() as conexao:
+            repositorio = RepositorioEstoque(conexao)
+            self._situacao(repositorio, sku)  # produto inexistente -> ProdutoNaoEncontrado
+            return repositorio.listar_retencoes(sku, tipo, status, solicitacao_id)
+
     def consultar_reserva(self, reserva_id: str) -> Retencao:
         return self._consultar_retencao(TipoRetencao.RESERVA, reserva_id)
 

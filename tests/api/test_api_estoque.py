@@ -258,6 +258,23 @@ class TestStatusHttp:
         assert quantidades(cliente)["quantidade_total"] == 8
         assert cliente.post(f"/bloqueios/{bloqueio_id}/baixar").status_code == 409
 
+    def test_listar_retencoes_encontra_a_reserva_de_uma_solicitacao(
+        self, cliente: TestClient
+    ) -> None:
+        cadastrar(cliente)
+        for solicitacao in ("PED-1", "PED-2"):
+            cliente.post(
+                "/produtos/NB-001/reservas", json={"quantidade": 1, "solicitacao_id": solicitacao}
+            )
+
+        resposta = cliente.get(
+            "/produtos/NB-001/retencoes", params={"solicitacao_id": "PED-1", "status": "ATIVA"}
+        )
+
+        assert resposta.status_code == 200
+        assert [r["solicitacao_id"] for r in resposta.json()] == ["PED-1"]
+        assert cliente.get("/produtos/NB-001/retencoes?status=INVALIDO").status_code == 422
+
     def test_reserva_inexistente_responde_404(self, cliente: TestClient) -> None:
         assert cliente.get("/reservas/nao-existe").status_code == 404
         assert cliente.post("/reservas/nao-existe/liberar").status_code == 404

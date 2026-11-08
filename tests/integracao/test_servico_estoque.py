@@ -310,6 +310,27 @@ class TestBaixaDeBloqueio:
         assert saldo(servico) == (10, 7, 3, 0)
 
 
+class TestListagemDeRetencoes:
+    def test_filtra_por_solicitacao_status_e_tipo(self, servico, sku_com_estoque) -> None:
+        r1 = servico.reservar(sku_com_estoque, 2, "PED-1")
+        r2 = servico.reservar(sku_com_estoque, 1, "PED-1")
+        servico.reservar(sku_com_estoque, 3, "PED-2")
+        b1 = servico.bloquear(sku_com_estoque, 1, "PED-1")
+        servico.liberar_reserva(r2.id)
+
+        def ids(**filtros: object) -> list[str]:
+            return [r.id for r in servico.listar_retencoes(sku_com_estoque, **filtros)]
+
+        assert len(ids()) == 4
+        assert ids(solicitacao_id="PED-1") == [r1.id, r2.id, b1.id]
+        assert ids(solicitacao_id="PED-1", status=StatusRetencao.ATIVA) == [r1.id, b1.id]
+        assert ids(solicitacao_id="PED-1", tipo=TipoRetencao.RESERVA) == [r1.id, r2.id]
+
+    def test_produto_inexistente(self, servico: ServicoEstoque) -> None:
+        with pytest.raises(ProdutoNaoEncontrado):
+            servico.listar_retencoes("NAO-EXISTE")
+
+
 class TestMovimentacoes:
     def test_cada_operacao_gera_um_registro_no_historico(self, servico, sku_com_estoque) -> None:
         reserva = servico.reservar(sku_com_estoque, 3, "PED-1")

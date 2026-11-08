@@ -10,7 +10,8 @@ executa rotas `def` em um pool de threads, sem travar o servidor para as outras 
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi import status as http_status
 
 from estoque.api.schemas import (
     ErroResposta,
@@ -21,6 +22,7 @@ from estoque.api.schemas import (
     RetencaoResposta,
     SituacaoResposta,
 )
+from estoque.domain.models import StatusRetencao, TipoRetencao
 from estoque.service import ServicoEstoque
 
 
@@ -49,7 +51,7 @@ def _erros(*codigos: int) -> dict[int | str, dict[str, Any]]:
 
 @router.post(
     "/produtos",
-    status_code=status.HTTP_201_CREATED,
+    status_code=http_status.HTTP_201_CREATED,
     tags=["Produtos"],
     summary="Cadastrar produto",
     responses=_erros(409, 422),
@@ -98,12 +100,29 @@ def listar_movimentacoes(sku: str, servico: Servico) -> list[MovimentacaoRespost
     return [MovimentacaoResposta.de_dominio(m) for m in servico.listar_movimentacoes(sku)]
 
 
+@router.get(
+    "/produtos/{sku}/retencoes",
+    tags=["Produtos"],
+    summary="Listar reservas e bloqueios do produto (filtros opcionais)",
+    responses=_erros(404, 422),
+)
+def listar_retencoes(
+    sku: str,
+    servico: Servico,
+    tipo: TipoRetencao | None = None,
+    status: StatusRetencao | None = None,
+    solicitacao_id: str | None = None,
+) -> list[RetencaoResposta]:
+    retencoes = servico.listar_retencoes(sku, tipo, status, solicitacao_id)
+    return [RetencaoResposta.de_dominio(r) for r in retencoes]
+
+
 # ------------------------------------------------------------------- reservas
 
 
 @router.post(
     "/produtos/{sku}/reservas",
-    status_code=status.HTTP_201_CREATED,
+    status_code=http_status.HTTP_201_CREATED,
     tags=["Reservas"],
     summary="Reservar unidades disponíveis para uma solicitação",
     responses=_erros(404, 409, 422),
@@ -151,7 +170,7 @@ def efetivar_reserva(reserva_id: str, servico: Servico) -> RetencaoResposta:
 
 @router.post(
     "/produtos/{sku}/bloqueios",
-    status_code=status.HTTP_201_CREATED,
+    status_code=http_status.HTTP_201_CREATED,
     tags=["Bloqueios"],
     summary="Bloquear unidades disponíveis",
     responses=_erros(404, 409, 422),

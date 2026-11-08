@@ -100,20 +100,30 @@ class RepositorioEstoque:
         linha = self._conexao.execute(
             "SELECT * FROM retencoes WHERE id = ?", (retencao_id,)
         ).fetchone()
-        if linha is None:
-            return None
-        return Retencao(
-            id=linha["id"],
-            sku=linha["sku"],
-            tipo=TipoRetencao(linha["tipo"]),
-            quantidade=linha["quantidade"],
-            solicitacao_id=linha["solicitacao_id"],
-            status=StatusRetencao(linha["status"]),
-            criada_em=_data_de_texto(linha["criada_em"]),
-            motivo=linha["motivo"],
-            liberada_em=_data_opcional_de_texto(linha["liberada_em"]),
-            efetivada_em=_data_opcional_de_texto(linha["efetivada_em"]),
-        )
+        return None if linha is None else _retencao_de_linha(linha)
+
+    def listar_retencoes(
+        self,
+        sku: str,
+        tipo: TipoRetencao | None = None,
+        status: StatusRetencao | None = None,
+        solicitacao_id: str | None = None,
+    ) -> list[Retencao]:
+        """Retenções do produto, das mais antigas para as mais recentes, com filtros opcionais.
+
+        Só nomes de coluna fixos entram no texto do SQL; os valores vão como parâmetros `?`.
+        """
+        condicoes, parametros = ["sku = ?"], [sku]
+        filtros = {"tipo": tipo, "status": status, "solicitacao_id": solicitacao_id}
+        for coluna, valor in filtros.items():
+            if valor is not None:
+                condicoes.append(f"{coluna} = ?")
+                parametros.append(str(valor))
+        linhas = self._conexao.execute(
+            f"SELECT * FROM retencoes WHERE {' AND '.join(condicoes)} ORDER BY criada_em, id",
+            parametros,
+        ).fetchall()
+        return [_retencao_de_linha(linha) for linha in linhas]
 
     def atualizar_retencao(self, retencao: Retencao) -> None:
         """Grava a mudança de estado de uma retenção (liberação ou efetivação)."""
@@ -161,6 +171,21 @@ class RepositorioEstoque:
             )
             for linha in linhas
         ]
+
+
+def _retencao_de_linha(linha: sqlite3.Row) -> Retencao:
+    return Retencao(
+        id=linha["id"],
+        sku=linha["sku"],
+        tipo=TipoRetencao(linha["tipo"]),
+        quantidade=linha["quantidade"],
+        solicitacao_id=linha["solicitacao_id"],
+        status=StatusRetencao(linha["status"]),
+        criada_em=_data_de_texto(linha["criada_em"]),
+        motivo=linha["motivo"],
+        liberada_em=_data_opcional_de_texto(linha["liberada_em"]),
+        efetivada_em=_data_opcional_de_texto(linha["efetivada_em"]),
+    )
 
 
 # Datas são gravadas como texto ISO 8601 com fuso (ex.: 2026-11-08T12:00:00+00:00).
