@@ -135,6 +135,33 @@ class ServicoEstoque:
     def liberar_bloqueio(self, bloqueio_id: str) -> Retencao:
         return self._liberar(TipoRetencao.BLOQUEIO, bloqueio_id)
 
+    def efetivar_reserva(self, reserva_id: str) -> Retencao:
+        """Entrega do pedido: as unidades reservadas saem do estoque numa única transação.
+
+        O total cai e o reservado cai na mesma quantidade, então o disponível não muda.
+        Fazer isso em uma operação só evita a brecha de "liberar e depois dar saída", em que
+        outra requisição poderia usar as unidades no intervalo entre as duas chamadas.
+        """
+        with self._banco.escrita() as conexao:
+            repositorio = RepositorioEstoque(conexao)
+            reserva = self._buscar_retencao(repositorio, TipoRetencao.RESERVA, reserva_id)
+
+            agora = self._relogio()
+            efetivada = reserva.efetivar(agora)  # já liberada/efetivada -> erro 409
+            saldo = self._situacao(repositorio, efetivada.sku).saldo
+            repositorio.atualizar_total(
+                efetivada.sku, saldo.quantidade_total - efetivada.quantidade
+            )
+            repositorio.atualizar_retencao(efetivada)
+            repositorio.registrar_movimentacao(
+                efetivada.sku,
+                TipoMovimentacao.EFETIVACAO_RESERVA,
+                efetivada.quantidade,
+                agora,
+                efetivada.id,
+            )
+            return efetivada
+
     # ------------------------------------------------------------------- internos
 
     def _reter(

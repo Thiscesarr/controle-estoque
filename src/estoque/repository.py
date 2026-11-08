@@ -79,8 +79,8 @@ class RepositorioEstoque:
         self._conexao.execute(
             """
             INSERT INTO retencoes (id, sku, tipo, quantidade, solicitacao_id, motivo,
-                                   status, criada_em, liberada_em)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   status, criada_em, liberada_em, efetivada_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 retencao.id,
@@ -92,6 +92,7 @@ class RepositorioEstoque:
                 retencao.status.value,
                 _texto_de_data(retencao.criada_em),
                 _texto_de_data(retencao.liberada_em),
+                _texto_de_data(retencao.efetivada_em),
             ),
         )
 
@@ -111,13 +112,19 @@ class RepositorioEstoque:
             criada_em=_data_de_texto(linha["criada_em"]),
             motivo=linha["motivo"],
             liberada_em=_data_opcional_de_texto(linha["liberada_em"]),
+            efetivada_em=_data_opcional_de_texto(linha["efetivada_em"]),
         )
 
     def atualizar_retencao(self, retencao: Retencao) -> None:
-        """Grava a mudança de estado de uma retenção (hoje, só a liberação)."""
+        """Grava a mudança de estado de uma retenção (liberação ou efetivação)."""
         self._conexao.execute(
-            "UPDATE retencoes SET status = ?, liberada_em = ? WHERE id = ?",
-            (retencao.status.value, _texto_de_data(retencao.liberada_em), retencao.id),
+            "UPDATE retencoes SET status = ?, liberada_em = ?, efetivada_em = ? WHERE id = ?",
+            (
+                retencao.status.value,
+                _texto_de_data(retencao.liberada_em),
+                _texto_de_data(retencao.efetivada_em),
+                retencao.id,
+            ),
         )
 
     # ------------------------------------------------------------ movimentações

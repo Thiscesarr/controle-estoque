@@ -14,6 +14,7 @@ from estoque.domain.errors import (
     DadoInvalido,
     QuantidadeIndisponivel,
     QuantidadeInvalida,
+    RetencaoJaEfetivada,
     RetencaoJaLiberada,
 )
 
@@ -75,10 +76,15 @@ class TipoRetencao(StrEnum):
 
 
 class StatusRetencao(StrEnum):
-    """Ciclo de vida de uma retenção: nasce ativa e pode ser liberada uma única vez."""
+    """Ciclo de vida de uma retenção: nasce ativa e é encerrada uma única vez.
+
+    LIBERADA: as unidades voltaram ao disponível.
+    EFETIVADA: as unidades reservadas saíram do estoque (pedido entregue). Só para reservas.
+    """
 
     ATIVA = "ATIVA"
     LIBERADA = "LIBERADA"
+    EFETIVADA = "EFETIVADA"
 
 
 class TipoMovimentacao(StrEnum):
@@ -90,6 +96,7 @@ class TipoMovimentacao(StrEnum):
     BLOQUEIO = "BLOQUEIO"
     LIBERACAO_RESERVA = "LIBERACAO_RESERVA"
     LIBERACAO_BLOQUEIO = "LIBERACAO_BLOQUEIO"
+    EFETIVACAO_RESERVA = "EFETIVACAO_RESERVA"
 
 
 @dataclass(frozen=True)
@@ -150,6 +157,7 @@ class Retencao:
     criada_em: datetime
     motivo: str | None = None  # texto livre opcional (ex.: "caixa avariada")
     liberada_em: datetime | None = None
+    efetivada_em: datetime | None = None
 
     @property
     def ativa(self) -> bool:
@@ -163,9 +171,23 @@ class Retencao:
         resultado (gravar no banco). O instante é recebido como parâmetro, em vez de ler o
         relógio aqui dentro, para que a regra seja previsível e fácil de testar.
         """
-        if not self.ativa:
-            raise RetencaoJaLiberada(self.id)
+        self._garantir_ativa()
         return replace(self, status=StatusRetencao.LIBERADA, liberada_em=em)
+
+    def efetivar(self, em: datetime) -> "Retencao":
+        """Devolve uma NOVA reserva, efetivada no instante `em` (as unidades saíram).
+
+        Quem garante que só reservas são efetivadas é o serviço, que busca a retenção pelo tipo.
+        """
+        self._garantir_ativa()
+        return replace(self, status=StatusRetencao.EFETIVADA, efetivada_em=em)
+
+    def _garantir_ativa(self) -> None:
+        """Uma retenção só muda de estado uma vez: liberada ou efetivada, não volta atrás."""
+        if self.status == StatusRetencao.LIBERADA:
+            raise RetencaoJaLiberada(self.id)
+        if self.status == StatusRetencao.EFETIVADA:
+            raise RetencaoJaEfetivada(self.id)
 
 
 @dataclass(frozen=True)

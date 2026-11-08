@@ -104,6 +104,7 @@ class RetencaoResposta(BaseModel):
     status: StatusRetencao
     criada_em: datetime
     liberada_em: datetime | None
+    efetivada_em: datetime | None
 
     @classmethod
     def de_dominio(cls, retencao: Retencao) -> "RetencaoResposta":
@@ -117,6 +118,7 @@ class RetencaoResposta(BaseModel):
             status=retencao.status,
             criada_em=retencao.criada_em,
             liberada_em=retencao.liberada_em,
+            efetivada_em=retencao.efetivada_em,
         )
 
 

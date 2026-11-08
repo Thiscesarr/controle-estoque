@@ -136,6 +136,16 @@ def liberar_reserva(reserva_id: str, servico: Servico) -> RetencaoResposta:
     return RetencaoResposta.de_dominio(servico.liberar_reserva(reserva_id))
 
 
+@router.post(
+    "/reservas/{reserva_id}/efetivar",
+    tags=["Reservas"],
+    summary="Efetivar uma reserva (pedido entregue: as unidades saem do estoque)",
+    responses=_erros(404, 409),
+)
+def efetivar_reserva(reserva_id: str, servico: Servico) -> RetencaoResposta:
+    return RetencaoResposta.de_dominio(servico.efetivar_reserva(reserva_id))
+
+
 # ------------------------------------------------------------------ bloqueios
 
 

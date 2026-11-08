@@ -27,9 +27,10 @@ CREATE TABLE IF NOT EXISTS retencoes (
     quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
     solicitacao_id TEXT NOT NULL,
     motivo         TEXT,
-    status         TEXT NOT NULL CHECK (status IN ('ATIVA', 'LIBERADA')),
+    status         TEXT NOT NULL CHECK (status IN ('ATIVA', 'LIBERADA', 'EFETIVADA')),
     criada_em      TEXT NOT NULL,
-    liberada_em    TEXT
+    liberada_em    TEXT,
+    efetivada_em   TEXT
 );
 
 -- Acelera a soma das retenções ativas de um produto, feita em toda operação.

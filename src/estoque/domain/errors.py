@@ -89,3 +89,13 @@ class RetencaoJaLiberada(ErroDominio):
     def __init__(self, retencao_id: str) -> None:
         super().__init__(f"Reserva/bloqueio '{retencao_id}' já foi liberado")
         self.retencao_id = retencao_id
+
+
+class RetencaoJaEfetivada(ErroDominio):
+    """Uma reserva efetivada já saiu do estoque: não pode ser liberada nem efetivada de novo."""
+
+    codigo = "RETENCAO_JA_EFETIVADA"
+
+    def __init__(self, retencao_id: str) -> None:
+        super().__init__(f"Reserva '{retencao_id}' já foi efetivada")
+        self.retencao_id = retencao_id

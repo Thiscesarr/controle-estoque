@@ -20,8 +20,13 @@ from hypothesis import strategies as st
 from hypothesis.stateful import Bundle, RuleBasedStateMachine, invariant, multiple, rule
 
 from estoque.db import BancoDeDados
-from estoque.domain.errors import QuantidadeIndisponivel, RetencaoJaLiberada
-from estoque.domain.models import TipoRetencao
+from estoque.domain.errors import (
+    QuantidadeIndisponivel,
+    RetencaoJaEfetivada,
+    RetencaoJaLiberada,
+    RetencaoNaoEncontrada,
+)
+from estoque.domain.models import StatusRetencao, TipoRetencao
 from estoque.service import ServicoEstoque
 from tests.apoio import SKU
 
@@ -41,6 +46,7 @@ class MaquinaDeEstoque(RuleBasedStateMachine):
         self.total = 0
         self.ativas: dict[str, tuple[TipoRetencao, int]] = {}
         self.tipo_por_id: dict[str, TipoRetencao] = {}
+        self.encerradas: dict[str, StatusRetencao] = {}  # id -> LIBERADA ou EFETIVADA
 
     def teardown(self) -> None:
         shutil.rmtree(self._pasta, ignore_errors=True)
@@ -97,9 +103,29 @@ class MaquinaDeEstoque(RuleBasedStateMachine):
         if retencao_id in self.ativas:
             operacao(retencao_id)
             del self.ativas[retencao_id]
-        else:  # o Hypothesis também tenta liberar o que já foi liberado
-            with pytest.raises(RetencaoJaLiberada):
+            self.encerradas[retencao_id] = StatusRetencao.LIBERADA
+        else:  # o Hypothesis também tenta liberar o que já foi encerrado
+            with pytest.raises(self._erro_esperado(retencao_id)):
                 operacao(retencao_id)
+
+    @rule(retencao_id=retencoes)
+    def efetivar(self, retencao_id: str) -> None:
+        if self.tipo_por_id[retencao_id] == TipoRetencao.BLOQUEIO:
+            with pytest.raises(RetencaoNaoEncontrada):  # bloqueio não é reserva
+                self.servico.efetivar_reserva(retencao_id)
+        elif retencao_id in self.ativas:
+            self.servico.efetivar_reserva(retencao_id)
+            _, quantidade = self.ativas.pop(retencao_id)
+            self.total -= quantidade  # as unidades reservadas saíram do estoque
+            self.encerradas[retencao_id] = StatusRetencao.EFETIVADA
+        else:
+            with pytest.raises(self._erro_esperado(retencao_id)):
+                self.servico.efetivar_reserva(retencao_id)
+
+    def _erro_esperado(self, retencao_id: str) -> type[Exception]:
+        if self.encerradas[retencao_id] == StatusRetencao.LIBERADA:
+            return RetencaoJaLiberada
+        return RetencaoJaEfetivada
 
     # ------------------------------------------------- conferido a cada passo
 

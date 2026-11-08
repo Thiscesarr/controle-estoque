@@ -13,7 +13,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TypeVar
 
-from estoque.domain.errors import QuantidadeIndisponivel, RetencaoJaLiberada
+from estoque.domain.errors import QuantidadeIndisponivel, RetencaoJaEfetivada, RetencaoJaLiberada
 from estoque.service import ServicoEstoque
 
 T = TypeVar("T")
@@ -112,3 +112,30 @@ def test_liberacoes_simultaneas_da_mesma_reserva_devolvem_uma_unica_vez(
     assert sum(resultados) == 1
     saldo = servico.consultar(sku_com_estoque).saldo
     assert saldo.quantidade_disponivel == 10  # e não 10 + 3 * 9
+
+
+def test_liberar_e_efetivar_a_mesma_reserva_ao_mesmo_tempo_so_um_vence(
+    servico: ServicoEstoque, sku_com_estoque: str
+) -> None:
+    """Corrida entre "cliente cancelou" e "pedido entregue": só uma das duas pode acontecer."""
+    reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+
+    def tentar(acao: Callable[[str], object], nome: str) -> Callable[[], str | None]:
+        def executar() -> str | None:
+            try:
+                acao(reserva.id)
+                return nome
+            except (RetencaoJaLiberada, RetencaoJaEfetivada):
+                return None
+
+        return executar
+
+    acoes = [tentar(servico.liberar_reserva, "liberou") for _ in range(10)]
+    acoes += [tentar(servico.efetivar_reserva, "efetivou") for _ in range(10)]
+    vencedores = [r for r in executar_ao_mesmo_tempo(acoes) if r is not None]
+
+    assert len(vencedores) == 1
+    saldo = servico.consultar(sku_com_estoque).saldo
+    esperado = (10, 10) if vencedores[0] == "liberou" else (7, 7)  # (total, disponível)
+    assert (saldo.quantidade_total, saldo.quantidade_disponivel) == esperado
+    assert saldo.quantidade_reservada == 0

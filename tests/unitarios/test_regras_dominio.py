@@ -13,6 +13,7 @@ from estoque.domain.errors import (
     DadoInvalido,
     QuantidadeIndisponivel,
     QuantidadeInvalida,
+    RetencaoJaEfetivada,
     RetencaoJaLiberada,
 )
 from estoque.domain.models import (
@@ -135,3 +136,25 @@ class TestRetencao:
         liberada = nova_reserva().liberar(INSTANTE)
         with pytest.raises(RetencaoJaLiberada):
             liberada.liberar(INSTANTE)
+
+    def test_efetivar_devolve_uma_nova_reserva_efetivada(self) -> None:
+        original = nova_reserva()
+
+        efetivada = original.efetivar(INSTANTE)
+
+        assert efetivada.status == StatusRetencao.EFETIVADA
+        assert efetivada.efetivada_em == INSTANTE
+        assert efetivada.liberada_em is None
+        assert original.ativa
+
+    def test_reserva_efetivada_nao_pode_ser_liberada_nem_efetivada_de_novo(self) -> None:
+        efetivada = nova_reserva().efetivar(INSTANTE)
+        with pytest.raises(RetencaoJaEfetivada):
+            efetivada.liberar(INSTANTE)
+        with pytest.raises(RetencaoJaEfetivada):
+            efetivada.efetivar(INSTANTE)
+
+    def test_reserva_liberada_nao_pode_ser_efetivada(self) -> None:
+        liberada = nova_reserva().liberar(INSTANTE)
+        with pytest.raises(RetencaoJaLiberada):
+            liberada.efetivar(INSTANTE)

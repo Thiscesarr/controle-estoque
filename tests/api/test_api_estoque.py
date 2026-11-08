@@ -138,9 +138,40 @@ class TestStatusHttp:
         assert segunda.status_code == 409
         assert segunda.json()["codigo"] == "RETENCAO_JA_LIBERADA"
 
+    def test_efetivar_reserva(self, cliente: TestClient) -> None:
+        cadastrar(cliente)
+        reserva_id = cliente.post(
+            "/produtos/NB-001/reservas", json={"quantidade": 3, "solicitacao_id": "PED-1"}
+        ).json()["id"]
+
+        resposta = cliente.post(f"/reservas/{reserva_id}/efetivar")
+
+        assert resposta.status_code == 200
+        assert resposta.json()["status"] == "EFETIVADA"
+        assert resposta.json()["efetivada_em"] is not None
+        assert quantidades(cliente) == {
+            "quantidade_total": 7,
+            "quantidade_disponivel": 7,
+            "quantidade_reservada": 0,
+            "quantidade_bloqueada": 0,
+        }
+
+    def test_efetivar_duas_vezes_ou_liberar_depois_responde_409(self, cliente: TestClient) -> None:
+        cadastrar(cliente)
+        reserva_id = cliente.post(
+            "/produtos/NB-001/reservas", json={"quantidade": 3, "solicitacao_id": "PED-1"}
+        ).json()["id"]
+        cliente.post(f"/reservas/{reserva_id}/efetivar")
+
+        for acao in ("efetivar", "liberar"):
+            resposta = cliente.post(f"/reservas/{reserva_id}/{acao}")
+            assert resposta.status_code == 409
+            assert resposta.json()["codigo"] == "RETENCAO_JA_EFETIVADA"
+
     def test_reserva_inexistente_responde_404(self, cliente: TestClient) -> None:
         assert cliente.get("/reservas/nao-existe").status_code == 404
         assert cliente.post("/reservas/nao-existe/liberar").status_code == 404
+        assert cliente.post("/reservas/nao-existe/efetivar").status_code == 404
 
     def test_id_de_reserva_na_rota_de_bloqueios_responde_404(self, cliente: TestClient) -> None:
         cadastrar(cliente)

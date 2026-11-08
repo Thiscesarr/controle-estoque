@@ -15,6 +15,7 @@ from estoque.domain.errors import (
     ProdutoNaoEncontrado,
     QuantidadeIndisponivel,
     QuantidadeInvalida,
+    RetencaoJaEfetivada,
     RetencaoJaLiberada,
     RetencaoNaoEncontrada,
 )
@@ -198,6 +199,75 @@ class TestLiberacao:
             servico.liberar_bloqueio(reserva.id)
 
         assert saldo(servico) == (10, 7, 3, 0)
+
+
+class TestEfetivacao:
+    def test_efetivar_baixa_total_e_reservado_sem_mexer_no_disponivel(
+        self, servico, sku_com_estoque
+    ) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        assert saldo(servico) == (10, 7, 3, 0)
+
+        efetivada = servico.efetivar_reserva(reserva.id)
+
+        assert efetivada.status == StatusRetencao.EFETIVADA
+        assert efetivada.efetivada_em == INSTANTE_FIXO
+        assert saldo(servico) == (7, 7, 0, 0)
+
+    def test_efetiva_somente_a_reserva_indicada(self, servico, sku_com_estoque) -> None:
+        primeira = servico.reservar(sku_com_estoque, 2, "PED-1")
+        servico.reservar(sku_com_estoque, 3, "PED-2")
+
+        servico.efetivar_reserva(primeira.id)
+
+        assert saldo(servico) == (8, 5, 3, 0)
+
+    def test_nao_efetiva_duas_vezes(self, servico, sku_com_estoque) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        servico.efetivar_reserva(reserva.id)
+
+        with pytest.raises(RetencaoJaEfetivada):
+            servico.efetivar_reserva(reserva.id)
+
+        assert saldo(servico) == (7, 7, 0, 0)  # não baixou as 3 unidades duas vezes
+
+    def test_reserva_efetivada_nao_pode_ser_liberada(self, servico, sku_com_estoque) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        servico.efetivar_reserva(reserva.id)
+
+        with pytest.raises(RetencaoJaEfetivada):
+            servico.liberar_reserva(reserva.id)
+
+        assert saldo(servico) == (7, 7, 0, 0)
+
+    def test_reserva_liberada_nao_pode_ser_efetivada(self, servico, sku_com_estoque) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        servico.liberar_reserva(reserva.id)
+
+        with pytest.raises(RetencaoJaLiberada):
+            servico.efetivar_reserva(reserva.id)
+
+        assert saldo(servico) == (10, 10, 0, 0)
+
+    def test_bloqueio_nao_pode_ser_efetivado(self, servico, sku_com_estoque) -> None:
+        bloqueio = servico.bloquear(sku_com_estoque, 2, "INS-1")
+
+        with pytest.raises(RetencaoNaoEncontrada):
+            servico.efetivar_reserva(bloqueio.id)
+
+        assert saldo(servico) == (10, 8, 0, 2)
+
+    def test_efetivacao_entra_no_historico(self, servico, sku_com_estoque) -> None:
+        reserva = servico.reservar(sku_com_estoque, 3, "PED-1")
+        servico.efetivar_reserva(reserva.id)
+
+        ultima = servico.listar_movimentacoes(sku_com_estoque)[-1]
+
+        assert (ultima.tipo, ultima.quantidade, ultima.retencao_id) == (
+            TipoMovimentacao.EFETIVACAO_RESERVA,
+            3,
+            reserva.id,
+        )
 
 
 class TestMovimentacoes:

@@ -23,6 +23,7 @@ from estoque.domain.errors import (
     ProdutoNaoEncontrado,
     QuantidadeIndisponivel,
     QuantidadeInvalida,
+    RetencaoJaEfetivada,
     RetencaoJaLiberada,
     RetencaoNaoEncontrada,
 )
@@ -39,6 +40,7 @@ STATUS_HTTP_POR_ERRO: dict[type[ErroDominio], int] = {
     ProdutoJaCadastrado: 409,  # conflito com o estado atual
     QuantidadeIndisponivel: 409,
     RetencaoJaLiberada: 409,
+    RetencaoJaEfetivada: 409,
 }
 
 DESCRICAO = """
