@@ -1,15 +1,26 @@
 """Modelos do domínio de estoque.
 
-Este módulo descreve O QUE existe no negócio: o produto, as retenções (reservas e
-bloqueios) e o saldo de um produto. Ele não sabe nada de banco de dados nem de HTTP.
-
-As validações (ex.: "não reservar mais do que o disponível") entram no próximo passo,
-junto com os erros do domínio.
+Este módulo descreve O QUE existe no negócio (o produto, as retenções e o saldo) e as
+regras que dependem só desses dados (ex.: "não reservar mais do que o disponível").
+Ele não sabe nada de banco de dados nem de HTTP.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
+
+from estoque.domain.errors import QuantidadeIndisponivel, QuantidadeInvalida, RetencaoJaLiberada
+
+
+def validar_quantidade(quantidade: object) -> int:
+    """Garante que a quantidade de uma operação é um inteiro maior que zero.
+
+    `bool` é rejeitado de propósito: em Python, `True` é um `int` que vale 1, e aceitar
+    `True` como "1 unidade" esconderia um erro de quem chamou.
+    """
+    if isinstance(quantidade, bool) or not isinstance(quantidade, int) or quantidade <= 0:
+        raise QuantidadeInvalida(quantidade)
+    return quantidade
 
 
 class TipoRetencao(StrEnum):
@@ -64,6 +75,17 @@ class Retencao:
         """Só retenções ativas contam como quantidade reservada/bloqueada."""
         return self.status == StatusRetencao.ATIVA
 
+    def liberar(self, em: datetime) -> "Retencao":
+        """Devolve uma NOVA retenção, já liberada no instante `em`.
+
+        O objeto original não muda (é imutável); quem chama decide o que fazer com o
+        resultado (gravar no banco). O instante é recebido como parâmetro, em vez de ler o
+        relógio aqui dentro, para que a regra seja previsível e fácil de testar.
+        """
+        if not self.ativa:
+            raise RetencaoJaLiberada(self.id)
+        return replace(self, status=StatusRetencao.LIBERADA, liberada_em=em)
+
 
 @dataclass(frozen=True)
 class SaldoEstoque:
@@ -77,3 +99,8 @@ class SaldoEstoque:
     def quantidade_disponivel(self) -> int:
         """O disponível é sempre derivado: total menos tudo que está retido."""
         return self.quantidade_total - self.quantidade_reservada - self.quantidade_bloqueada
+
+    def garantir_disponivel(self, quantidade: int) -> None:
+        """Regra comum a saída, reserva e bloqueio: só se usa o que está disponível."""
+        if quantidade > self.quantidade_disponivel:
+            raise QuantidadeIndisponivel(quantidade, self.quantidade_disponivel)
