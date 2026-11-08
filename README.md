@@ -38,9 +38,19 @@ quantidade e solicitação de origem); o reservado e o bloqueado são a soma dos
 **ativos**, e o disponível é **calculado**. Não existe número guardado que possa ficar
 desatualizado.
 
-Uma reserva termina de uma de duas formas: **liberada** (cancelamento: as unidades voltam ao
-disponível) ou **efetivada** (pedido entregue: as unidades saem do estoque, numa única
-transação).
+### Ciclo de vida de uma reserva ou bloqueio
+
+```mermaid
+stateDiagram-v2
+    [*] --> ATIVA: reservar ou bloquear
+    ATIVA --> LIBERADA: liberar (unidades voltam ao disponível)
+    ATIVA --> EFETIVADA: efetivar reserva ou baixar bloqueio (unidades saem do estoque)
+    LIBERADA --> [*]
+    EFETIVADA --> [*]
+```
+
+Só retenções **ativas** contam no reservado e no bloqueado. Cada retenção é encerrada uma
+única vez, numa única transação; nova tentativa de encerrar responde 409.
 
 ### Exemplo (centro de distribuição)
 
@@ -69,10 +79,12 @@ transação).
 | **Bloquear** | `POST /produtos/{sku}/bloqueios` | 201 | 404, 409, 422 |
 | Consultar bloqueio | `GET /bloqueios/{id}` | 200 | 404 |
 | **Liberar** bloqueio | `POST /bloqueios/{id}/liberar` | 200 | 404, 409 |
+| **Baixar** bloqueio (perda) | `POST /bloqueios/{id}/baixar` | 200 | 404, 409 |
+| Listar reservas e bloqueios | `GET /produtos/{sku}/retencoes?tipo=&status=&solicitacao_id=` | 200 | 404, 422 |
 | Histórico (auditoria) | `GET /produtos/{sku}/movimentacoes` | 200 | 404 |
 | Saúde da API | `GET /saude` | 200 | — |
 
-Todo erro, de negócio, de validação ou de rota, tem o mesmo formato:
+Todo erro, de negócio, de validação, de rota ou de infraestrutura, tem o mesmo formato:
 
 ```json
 { "codigo": "QUANTIDADE_INDISPONIVEL", "mensagem": "Quantidade solicitada (6) maior que a disponível (5)" }
@@ -84,6 +96,8 @@ Todo erro, de negócio, de validação ou de rota, tem o mesmo formato:
 | 405 | Método errado para a rota | `METODO_NAO_PERMITIDO` |
 | 409 | Conflito com o estado atual | `QUANTIDADE_INDISPONIVEL`, `PRODUTO_JA_CADASTRADO`, `RETENCAO_JA_LIBERADA`, `RETENCAO_JA_EFETIVADA` |
 | 422 | Dado inválido | `REQUISICAO_INVALIDA`, `DADO_INVALIDO`, `QUANTIDADE_INVALIDA` |
+| 500 | Erro inesperado (detalhe vai para o log) | `ERRO_INTERNO` |
+| 503 | Banco ocupado além do tempo de espera; pode repetir (`Retry-After`) | `BANCO_OCUPADO` |
 
 ---
 
@@ -143,6 +157,8 @@ SQLite por PostgreSQL, não mexe nas regras de negócio.
 | `tests/` | Testes unitários, de integração, de API, de concorrência e de propriedades |
 | `docs/DECISOES.md` | Cada decisão técnica com alternativas e consequências |
 | `docs/USO_DE_IA.md` | Prompts principais e análise do uso de IA |
+| `scripts/estresse.py` | Verificação de concorrência via HTTP contra a API no ar |
+| `requirements-lock.txt` | Versões exatas das dependências usadas nos testes |
 | `.github/workflows/ci.yml` | CI: lint, formatação e testes em Python 3.11 e 3.13 |
 
 ### Modelo de dados (SQLite)
@@ -155,7 +171,7 @@ SQLite por PostgreSQL, não mexe nas regras de negócio.
 
 ### Testes
 
-**122 testes, cobertura de 99%**, cerca de 10 segundos:
+**131 testes, cobertura de 99%**, cerca de 12 segundos:
 
 | Tipo | Onde | O que garante |
 |---|---|---|
@@ -167,6 +183,19 @@ SQLite por PostgreSQL, não mexe nas regras de negócio.
 
 Os testes de concorrência foram validados por mutação: sem as transações no `db.py`, 50 de 50
 reservas simultâneas foram aceitas com só 10 unidades, e os testes falharam.
+
+**Concorrência pela API real (HTTP):** `scripts/estresse.py` dispara requisições simultâneas
+contra a API no ar e confere o saldo final. Resultado na máquina de desenvolvimento:
+
+| Cenário | Resultado |
+|---|---|
+| 300 reservas simultâneas de 1 unidade, 50 em estoque | 50 aceitas (201), 250 recusadas (409) |
+| 300 operações mistas (entrada, saída, reserva, bloqueio) | saldo final igual à soma das aceitas; disponível nunca negativo |
+| 20 liberações simultâneas da mesma reserva | 1 aceita, 19 com 409 |
+| 10 liberações + 10 efetivações da mesma reserva | 1 aceita; saldo coerente com a vencedora |
+
+Nenhum erro 5xx em nenhum cenário. As latências medidas refletem o disco lento da máquina de
+desenvolvimento e não servem como referência de desempenho.
 
 ---
 
@@ -180,15 +209,16 @@ Detalhes, alternativas e consequências em [`docs/DECISOES.md`](docs/DECISOES.md
    mesmo comportamento.
 3. **Liberar e efetivar não apagam**: a retenção muda de status, preservando o histórico e
    diferenciando "não existe" (404) de "já encerrada" (409).
-4. **Efetivação atômica da reserva**: a entrega do pedido baixa o total e encerra a reserva na
+4. **Saída de unidades retidas em uma operação atômica**: a entrega do pedido (efetivar
+   reserva) e a perda por avaria (baixar bloqueio) baixam o total e encerram a retenção na
    mesma transação, sem a brecha de "liberar e depois dar saída".
 5. **Uma transação por operação, com `BEGIN IMMEDIATE`**: as escritas são serializadas, e
    duas operações simultâneas nunca leem o mesmo saldo.
 6. **SQLite com SQL escrito à mão**: transações ACID sem instalação extra e consultas
    explícitas.
 7. **FastAPI**: validação de entrada e Swagger gerados a partir do código.
-8. **Domínio isolado e contrato único de erro** (`{codigo, mensagem}`), inclusive para 404 e
-   405 de rota.
+8. **Domínio isolado e contrato único de erro** (`{codigo, mensagem}`), inclusive para rota
+   inexistente (404), método errado (405), banco ocupado (503) e erro inesperado (500).
 9. **Trilha de auditoria** gravada na mesma transação da operação.
 10. **Validação em duas camadas**: Pydantic no contrato HTTP e o domínio, que se protege
     venha a chamada de onde vier.
@@ -199,11 +229,12 @@ Detalhes, alternativas e consequências em [`docs/DECISOES.md`](docs/DECISOES.md
 
 - Quantidades são **unidades inteiras**, de 1 a 1.000.000 por operação.
 - **Total** = unidades fisicamente no estoque. A saída avulsa só consome o disponível;
-  unidades reservadas saem pela **efetivação** da reserva.
+  unidades reservadas saem pela **efetivação** da reserva, e unidades bloqueadas, pela
+  **baixa** do bloqueio.
 - Toda reserva e todo bloqueio pertencem a uma **solicitação** (`solicitacao_id`
   obrigatório); a mesma solicitação pode ter várias retenções.
 - Uma retenção é encerrada **uma única vez** (liberada ou efetivada), sempre pela quantidade
-  inteira. Só reservas podem ser efetivadas.
+  inteira.
 - O produto precisa ser **cadastrado** antes de receber entradas.
 - O **SKU não diferencia maiúsculas de minúsculas** (é guardado em maiúsculas) e aceita
   letras, números, `.`, `-` e `_`, porque faz parte da URL.
@@ -215,6 +246,9 @@ Detalhes, alternativas e consequências em [`docs/DECISOES.md`](docs/DECISOES.md
   vezes.
 - **Sem expiração de reservas**: uma reserva esquecida retém estoque até ser liberada.
 - **Sem liberação ou efetivação parcial**.
+- **Sem transferência direta entre retenções**: uma unidade reservada que se mostre avariada
+  precisa ser liberada e então bloqueada, em duas chamadas. A evolução seria uma operação
+  única "reserva → bloqueio", no mesmo padrão da efetivação.
 - **SQLite serializa as escritas** e é um arquivo local: serve para uma instância, não para
   várias instâncias da API em paralelo.
 - Sem autenticação, sem paginação no histórico e sem migrations versionadas. Ao atualizar o
@@ -236,6 +270,9 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
+
+As dependências têm limite superior de versão no `pyproject.toml`. Para usar exatamente as
+versões testadas: `pip install -r requirements-lock.txt` e depois `pip install -e . --no-deps`.
 
 ### Subir a API
 
@@ -268,6 +305,8 @@ ruff check .
 ruff format --check .
 ```
 
+Concorrência via HTTP, com a API no ar em outro CMD: `python scripts\estresse.py`.
+
 ---
 
 ## 7. Em produção, o que eu faria diferente
@@ -297,9 +336,10 @@ completo, com os prompts, está em [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
 
 - **Onde mais ajudou:** escrita do código (Python, FastAPI, Pydantic, SQL), testes de
   concorrência e de propriedades com Hypothesis, e levantamento de casos de borda.
-- **Sugestões que modifiquei:** reserva entregue em duas chamadas (liberar + saída) virou uma
-  efetivação atômica; SKU sensível a maiúsculas passou a ser normalizado; erros 404/405 do
-  framework passaram a seguir o contrato da API.
+- **Sugestões que modifiquei:** saída de unidades retidas em duas chamadas virou operação
+  atômica (efetivar reserva e baixar bloqueio); SKU sensível a maiúsculas passou a ser
+  normalizado; erros de rota e de infraestrutura passaram a seguir o contrato da API; e foi
+  incluída a listagem de reservas e bloqueios por solicitação.
 - **Erros identificados:** o modo WAL do SQLite, ativado pela IA, deixou a suíte de testes em
   132 s; a medição mostrou a causa, o WAL foi removido e a suíte caiu para 1,5 s. Também
   foram corrigidos um modelo com dado duplicado e um filtro de aviso do pytest com a
@@ -317,8 +357,8 @@ próximo passo em produção.
   registro, reserva gravada sem descontar o disponível.
 - **Nesta solução:** cada operação roda numa única transação (`db.py`), com `ROLLBACK` em
   qualquer erro. Estoque, retenção e histórico são gravados juntos, e a entrega do pedido
-  (efetivação) é atômica. Um teste simula uma falha no meio da operação e confirma que nada
-  muda.
+  (efetivação) e a baixa por perda são atômicas. Um teste simula uma falha no meio da
+  operação e confirma que nada muda.
 - **Em produção:** as mesmas transações no PostgreSQL, com migrations versionadas.
 
 ### 2. Controle de concorrência (confiabilidade e eficiência)
@@ -327,16 +367,17 @@ próximo passo em produção.
 - **Nesta solução:** `BEGIN IMMEDIATE` pega o lock antes de ler o saldo. Testes com threads:
   50 reservas simultâneas para 10 unidades (exatamente 10 passam), e liberação e efetivação
   disputando a mesma reserva (só uma vence). Teste de mutação: sem as transações, 50 de 50
-  reservas foram aceitas, e os testes falharam.
+  reservas foram aceitas, e os testes falharam. O mesmo comportamento foi conferido pela API
+  real com `scripts/estresse.py` (300 requisições simultâneas, nenhum erro).
 - **Em produção:** lock por produto (`SELECT ... FOR UPDATE`), para que produtos diferentes
   não esperem uns pelos outros, e idempotency key para reenvios.
 
 ### 3. Testes automatizados no CI (qualidade)
 - **Por que importa:** permitem mudar o código sem medo de quebrar uma regra que já
   funcionava.
-- **Nesta solução:** 122 testes em cinco níveis (domínio, serviço com banco real, API,
+- **Nesta solução:** 131 testes em cinco níveis (domínio, serviço com banco real, API,
   concorrência e propriedades com Hypothesis), cobertura de 99% e CI em Python 3.11 e 3.13
-  com lint e formatação. As três mudanças feitas na revisão vieram com testes próprios.
+  com lint e formatação. Cada mudança feita na revisão veio com testes próprios.
 - **Em produção:** testes de carga e de contrato no pipeline.
 
 ### 4. Rastreabilidade e observabilidade (confiabilidade em operação)

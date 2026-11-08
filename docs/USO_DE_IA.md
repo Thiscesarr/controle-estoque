@@ -43,6 +43,17 @@ Com a escrita revisada; o conteúdo é o das mensagens originais.
 > `{codigo, mensagem}`. Terceiro: o SKU não deve diferenciar maiúsculas de minúsculas, para
 > que o mesmo produto não possa ser cadastrado duas vezes."
 
+**4. Segunda revisão: falhas e lacunas**
+> "Analisei a solução e encontrei pontos que podem ser questionados. Travei o banco de
+> propósito e fiz uma entrada: a resposta veio `500 text/plain`, fora do contrato que o README
+> promete; banco ocupado deve responder 503 com `Retry-After`, e qualquer outro erro, 500 no
+> formato `{codigo, mensagem}`, com log. O bloqueio não tem baixa definitiva: uma caixa
+> avariada que vai para o lixo exige liberar e depois dar saída, a mesma brecha de duas
+> chamadas que foi fechada na reserva. E não há como listar as reservas e bloqueios de um
+> produto ou de uma solicitação; se o cliente perder o id da reserva do PED-1, não consegue
+> liberá-la. Também quero travar as versões das dependências, porque o Starlette já emite aviso
+> de depreciação, e documentar que uma unidade reservada não pode virar bloqueio diretamente."
+
 ---
 
 ## Onde a IA mais ajudou
@@ -60,21 +71,29 @@ Com a escrita revisada; o conteúdo é o das mensagens originais.
 
 ## Sugestões da IA que modifiquei
 
-**1. Entrega de reserva em duas chamadas → efetivação atômica.**
+**1. Saída de unidades retidas em duas chamadas → operação atômica.**
 A IA implementou só "liberar" e deixou a entrega do pedido como liberar a reserva e depois
 registrar a saída. Entre as duas chamadas, outra requisição pode usar as unidades. É o
 tipo de inconsistência que o case pede para evitar. Pedi `POST /reservas/{id}/efetivar`, que
-baixa o total e encerra a reserva na mesma transação.
+baixa o total e encerra a reserva na mesma transação. Na segunda revisão, apliquei a mesma
+correção ao bloqueio: `POST /bloqueios/{id}/baixar`, para a perda por avaria.
 
 **2. SKU sensível a maiúsculas → SKU normalizado.**
 Na versão da IA, `nb-001` e `NB-001` eram produtos diferentes. Em operação real, isso gera
 cadastro duplicado e estoque dividido entre dois registros do mesmo produto. O SKU passou a
 ser guardado e buscado em maiúsculas.
 
-**3. Erros de rota fora do padrão → contrato único.**
+**3. Erros fora do padrão → contrato único.**
 Nos testes da API, rota inexistente (404) e método errado (405) respondiam `{"detail": ...}`,
-enquanto o resto da API responde `{"codigo", "mensagem"}`. Um cliente da API precisa de um
-único formato de erro. Foi adicionado um tratador para esses erros.
+e banco travado ou erro inesperado respondiam `500` em texto puro, enquanto o resto da API
+responde `{"codigo", "mensagem"}`. Um cliente da API precisa de um único formato de erro e de
+saber quando vale repetir. Hoje: 404/405 no contrato, banco ocupado → 503 com `Retry-After`,
+erro inesperado → 500 `ERRO_INTERNO` com log.
+
+**4. Retenções sem listagem → consulta por produto e solicitação.**
+Só era possível consultar uma reserva pelo id. Se o cliente perdesse o id, não teria como
+liberá-la. Foi incluído `GET /produtos/{sku}/retencoes`, com filtros por tipo, status e
+solicitação.
 
 ---
 
@@ -107,10 +126,12 @@ primeira tentativa falhou por codificação do terminal do Windows.
 
 ## Como validei o que a IA produziu
 
-- **122 testes** automatizados, rodando no CI em Python 3.11 e 3.13.
+- **131 testes** automatizados, rodando no CI em Python 3.11 e 3.13.
 - **Teste de mutação**: as transações foram removidas de propósito e os testes de
   concorrência falharam (50 de 50 reservas aceitas com 10 unidades), confirmando que eles
   detectam o problema.
 - **Testes manuais** da API pelo Swagger e pelo terminal, conferindo o saldo esperado depois
   de cada operação.
+- **Concorrência via HTTP** com `scripts/estresse.py`: 300 requisições simultâneas contra a API
+  no ar, saldo final conferido e nenhum erro.
 - **Medição** antes de mudar algo por desempenho (caso do WAL).

@@ -187,19 +187,21 @@ decisão tem custo.
   propriedades cobrem o que exemplos escritos à mão não alcançam. A mutação provou que os
   testes de concorrência detectam a ausência de controle de concorrência.
 
-## 18. Efetivação atômica da reserva
+## 18. Saída de unidades retidas em uma operação atômica (efetivar e baixar)
 
-- **Contexto:** a versão inicial só tinha "liberar". Para entregar um pedido reservado, era
-  preciso liberar a reserva e depois registrar a saída, em duas chamadas. Entre elas, outra
-  requisição podia reservar ou retirar as mesmas unidades.
+- **Contexto:** a versão inicial só tinha "liberar". Para entregar um pedido reservado, ou
+  descartar uma unidade bloqueada por avaria, era preciso liberar e depois registrar a saída,
+  em duas chamadas. Entre elas, outra requisição podia usar as mesmas unidades.
 - **Alternativas:** manter as duas chamadas e documentar a brecha; ou uma operação única.
-- **Decisão:** `POST /reservas/{id}/efetivar`. Numa única transação, baixa o total, marca a
-  reserva como `EFETIVADA` e grava a movimentação `EFETIVACAO_RESERVA`. O disponível não muda
-  (as unidades já estavam fora dele).
-- **Por quê:** a operação de negócio "entregar o pedido" precisa ser atômica, do mesmo jeito
-  que as outras. Só reservas podem ser efetivadas; um id de bloqueio responde 404.
+- **Decisão:** `POST /reservas/{id}/efetivar` (entrega) e `POST /bloqueios/{id}/baixar`
+  (perda), com o mesmo fluxo no serviço (`_efetivar`). Numa única transação, baixa o total,
+  marca a retenção como `EFETIVADA` e grava a movimentação. O disponível não muda (as
+  unidades já estavam fora dele).
+- **Por quê:** "entregar o pedido" e "descartar a avaria" são operações de negócio únicas e
+  precisam ser atômicas, como as outras. Usar o id na rota do outro tipo responde 404.
 - **Evidência:** teste de concorrência com 10 liberações e 10 efetivações simultâneas da mesma
-  reserva: só uma vence, e o saldo final corresponde a ela.
+  reserva: só uma vence, e o saldo final corresponde a ela (também conferido via HTTP com
+  `scripts/estresse.py`).
 
 ## 19. SKU sem diferença entre maiúsculas e minúsculas
 
@@ -210,11 +212,17 @@ decisão tem custo.
 - **Por quê:** evita cadastro duplicado do mesmo produto e estoque dividido entre dois
   registros.
 
-## 20. Contrato único de erro também para erros de rota
+## 20. Contrato único de erro também para erros de rota e de infraestrutura
 
 - **Contexto:** os testes da API mostraram que rota inexistente (404) e método errado (405)
-  respondiam `{"detail": ...}`, formato padrão do FastAPI, diferente do resto da API.
-- **Decisão:** um tratador para `HTTPException` em `api/app.py` converte esses erros para
-  `{"codigo", "mensagem"}` (`ROTA_NAO_ENCONTRADA`, `METODO_NAO_PERMITIDO`), mantendo os
-  cabeçalhos originais (no 405, o `Allow` com os métodos aceitos).
-- **Por quê:** o cliente da API trata qualquer erro lendo sempre os mesmos campos.
+  respondiam `{"detail": ...}`, e que banco ocupado ou erro inesperado respondiam
+  `500 Internal Server Error` em texto puro, fora do contrato.
+- **Decisão:** tratadores em `api/app.py`:
+  - 404/405 → `ROTA_NAO_ENCONTRADA` / `METODO_NAO_PERMITIDO`, mantendo os cabeçalhos (no
+    405, o `Allow`);
+  - banco ocupado além do tempo de espera → **503** `BANCO_OCUPADO` com `Retry-After`, pois a
+    operação não foi aplicada e pode ser repetida;
+  - qualquer outro erro → **500** `ERRO_INTERNO`, com o detalhe registrado em log e não
+    exposto ao cliente.
+- **Por quê:** o cliente da API trata qualquer erro lendo sempre os mesmos campos, e sabe
+  quando vale repetir (503) e quando não (500).
