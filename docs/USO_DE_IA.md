@@ -11,30 +11,37 @@ mudanças descritas abaixo.
 
 ## Principais prompts
 
-Resumidos e com a escrita corrigida; o conteúdo é o das mensagens originais.
+Com a escrita revisada; o conteúdo é o das mensagens originais.
 
-**1. Planejamento**
-> "Segue o case em anexo. Quero fazer em Python. Me diga como você pensa em fazer. O mais
-> importante: eu preciso explicar por que cada decisão foi tomada, por que X e não Y, onde
-> está cada coisa no repositório e o que cada arquivo faz."
+**1. Entendimento do case e plano de solução**
+> "Segue em anexo o case de controle de estoque. Das linguagens permitidas, vou usar Python.
+> Antes de escrever qualquer código, quero um plano completo: como você modelaria o problema
+> (em especial as quantidades total, disponível, reservada e bloqueada, e as várias reservas e
+> bloqueios simultâneos por produto), qual arquitetura, banco de dados, forma de exposição e
+> estratégia de testes. Como referência do que eu já domino, considere um projeto pessoal
+> anterior: um app Android em Kotlin para controle de despensa, com regras de domínio
+> isoladas e testadas e persistência com Room. Ele serve só como referência, não como base.
+> Para cada decisão, quero a justificativa: por que essa opção, qual a alternativa descartada
+> e por quê, qual o custo da escolha, onde ela fica no repositório e qual a responsabilidade
+> de cada arquivo."
 
-**2. Produto, ferramentas e forma de construção**
-> "Descreva a ideia geral, as funcionalidades e a interface: vai ser app ou web? Explique o
-> que é cada ferramenta e o que ela faz. Construa o projeto arquivo por arquivo, como num
-> desenvolvimento normal, e a cada commit me explique o que mudou e o que cada arquivo faz."
+**2. Definição da solução e do processo de construção**
+> "Antes de implementar, detalhe a solução: a forma de exposição (aplicativo, site ou API) e o
+> motivo da escolha, as funcionalidades, os endpoints e a interface de uso. Para cada
+> ferramenta da stack, explique o que ela é e qual papel cumpre no projeto. A construção deve
+> ser incremental, um commit por etapa, como num desenvolvimento normal: a cada etapa, descreva
+> o que mudou, a responsabilidade de cada arquivo novo ou alterado e as decisões tomadas, para
+> que eu revise antes de avançar."
 
-**3. Ambiente de execução**
-> "No README, os comandos devem ser para CMD e não PowerShell, porque o PowerShell é
-> bloqueado no ambiente do banco."
-
-**4. Testes da API**
-> "Monte um roteiro para eu testar a API localmente, no terminal e no Swagger, cobrindo
-> todas as funcionalidades e a lógica de negócio, como um QA."
-
-**5. Revisão técnica**
-> "Quero mudar três escolhas: a entrega de uma reserva deve ser uma operação atômica, os erros
-> 404 e 405 devem seguir o formato de erro da API, e o SKU não deve diferenciar maiúsculas
-> de minúsculas."
+**3. Revisão técnica da solução**
+> "Revisando o código e testando a API, quero mudar três decisões. Primeiro: a entrega de um
+> pedido reservado hoje exige liberar a reserva e depois registrar a saída, em duas chamadas;
+> nesse intervalo outra requisição pode usar as unidades. Quero uma operação de efetivação que
+> baixe o total e encerre a reserva na mesma transação, com um teste de concorrência em que
+> liberar e efetivar disputam a mesma reserva. Segundo: rota inexistente e método não
+> permitido respondem no formato padrão do FastAPI; todo erro da API deve seguir o contrato
+> `{codigo, mensagem}`. Terceiro: o SKU não deve diferenciar maiúsculas de minúsculas, para
+> que o mesmo produto não possa ser cadastrado duas vezes."
 
 ---
 
@@ -65,13 +72,9 @@ cadastro duplicado e estoque dividido entre dois registros do mesmo produto. O S
 ser guardado e buscado em maiúsculas.
 
 **3. Erros de rota fora do padrão → contrato único.**
-O roteiro de testes da API mostrou que rota inexistente (404) e método errado (405) respondiam
-`{"detail": ...}`, enquanto o resto da API responde `{"codigo", "mensagem"}`. Um cliente da
-API precisa de um único formato de erro. Foi adicionado um tratador para esses erros.
-
-**4. Comandos de PowerShell → CMD.**
-O README veio com comandos de PowerShell, que é bloqueado no ambiente do banco. Os comandos
-passaram para CMD e foram executados no `cmd.exe` para confirmar que funcionam.
+Nos testes da API, rota inexistente (404) e método errado (405) respondiam `{"detail": ...}`,
+enquanto o resto da API responde `{"codigo", "mensagem"}`. Um cliente da API precisa de um
+único formato de erro. Foi adicionado um tratador para esses erros.
 
 ---
 
@@ -108,6 +111,6 @@ primeira tentativa falhou por codificação do terminal do Windows.
 - **Teste de mutação**: as transações foram removidas de propósito e os testes de
   concorrência falharam (50 de 50 reservas aceitas com 10 unidades), confirmando que eles
   detectam o problema.
-- **Roteiro de testes manual** da API pelo Swagger e pelo terminal, caso a caso, com o saldo
-  esperado em cada passo.
+- **Testes manuais** da API pelo Swagger e pelo terminal, conferindo o saldo esperado depois
+  de cada operação.
 - **Medição** antes de mudar algo por desempenho (caso do WAL).

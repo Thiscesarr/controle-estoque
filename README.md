@@ -299,7 +299,7 @@ completo, com os prompts, está em [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
   concorrência e de propriedades com Hypothesis, e levantamento de casos de borda.
 - **Sugestões que modifiquei:** reserva entregue em duas chamadas (liberar + saída) virou uma
   efetivação atômica; SKU sensível a maiúsculas passou a ser normalizado; erros 404/405 do
-  framework passaram a seguir o contrato da API; comandos de PowerShell passaram para CMD.
+  framework passaram a seguir o contrato da API.
 - **Erros identificados:** o modo WAL do SQLite, ativado pela IA, deixou a suíte de testes em
   132 s; a medição mostrou a causa, o WAL foi removido e a suíte caiu para 1,5 s. Também
   foram corrigidos um modelo com dado duplicado e um filtro de aviso do pytest com a
@@ -309,13 +309,49 @@ completo, com os prompts, está em [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
 
 ## 9. Visão de engenharia: 5 aspectos mais importantes
 
-1. **Consistência transacional.** Cada operação acontece por inteiro (estoque + histórico)
-   ou não acontece. Em estoque, estado parcial vira prejuízo.
-2. **Controle de concorrência.** Pedidos chegam ao mesmo tempo; sem lock, duas operações
-   leem o mesmo saldo e vendem a mesma unidade.
-3. **Testes automatizados no CI**, focados em regras, concorrência e invariantes: permitem
-   mudar o código com segurança.
-4. **Rastreabilidade e observabilidade.** O histórico explica por que o estoque está assim;
-   logs e métricas mostram o que está acontecendo agora.
-5. **Baixo acoplamento e contratos estáveis.** Domínio isolado e contrato de erro único
-   permitem evoluir sem quebrar quem usa a API.
+Para cada aspecto: por que ele importa, como ele está aplicado nesta solução e qual o
+próximo passo em produção.
+
+### 1. Consistência transacional (confiabilidade)
+- **Por que importa:** em estoque, um estado parcial vira prejuízo: unidade baixada sem
+  registro, reserva gravada sem descontar o disponível.
+- **Nesta solução:** cada operação roda numa única transação (`db.py`), com `ROLLBACK` em
+  qualquer erro. Estoque, retenção e histórico são gravados juntos, e a entrega do pedido
+  (efetivação) é atômica. Um teste simula uma falha no meio da operação e confirma que nada
+  muda.
+- **Em produção:** as mesmas transações no PostgreSQL, com migrations versionadas.
+
+### 2. Controle de concorrência (confiabilidade e eficiência)
+- **Por que importa:** pedidos chegam ao mesmo tempo. Sem controle, duas operações leem o
+  mesmo saldo e vendem a mesma unidade.
+- **Nesta solução:** `BEGIN IMMEDIATE` pega o lock antes de ler o saldo. Testes com threads:
+  50 reservas simultâneas para 10 unidades (exatamente 10 passam), e liberação e efetivação
+  disputando a mesma reserva (só uma vence). Teste de mutação: sem as transações, 50 de 50
+  reservas foram aceitas, e os testes falharam.
+- **Em produção:** lock por produto (`SELECT ... FOR UPDATE`), para que produtos diferentes
+  não esperem uns pelos outros, e idempotency key para reenvios.
+
+### 3. Testes automatizados no CI (qualidade)
+- **Por que importa:** permitem mudar o código sem medo de quebrar uma regra que já
+  funcionava.
+- **Nesta solução:** 122 testes em cinco níveis (domínio, serviço com banco real, API,
+  concorrência e propriedades com Hypothesis), cobertura de 99% e CI em Python 3.11 e 3.13
+  com lint e formatação. As três mudanças feitas na revisão vieram com testes próprios.
+- **Em produção:** testes de carga e de contrato no pipeline.
+
+### 4. Rastreabilidade e observabilidade (confiabilidade em operação)
+- **Por que importa:** quando o estoque físico não bate com o sistema, é preciso responder
+  "o que aconteceu?" com dados, não com suposição.
+- **Nesta solução:** toda operação aceita gera uma movimentação na mesma transação;
+  reservas e bloqueios nunca são apagados, só mudam de status, com data.
+- **Em produção:** usuário gravado em cada movimentação, logs estruturados com id de
+  correlação, métricas (latência, taxa de 409 por produto) e alertas.
+
+### 5. Baixo acoplamento e contratos estáveis (evolução)
+- **Por que importa:** requisitos mudam. A solução precisa absorver regras novas sem
+  reescrita e sem quebrar quem já consome a API.
+- **Nesta solução:** o domínio não depende de banco nem de HTTP; o SQL fica só no
+  repositório; os schemas da API são separados do domínio; todo erro segue o contrato
+  `{codigo, mensagem}`. A efetivação de reserva entrou sem mudar nenhuma regra existente.
+- **Em produção:** versionamento da API (`/v1`) e eventos de estoque publicados para outros
+  sistemas.
