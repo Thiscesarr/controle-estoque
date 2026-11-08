@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from estoque.api.routes import router
 from estoque.db import BancoDeDados
@@ -41,6 +42,12 @@ STATUS_HTTP_POR_ERRO: dict[type[ErroDominio], int] = {
     QuantidadeIndisponivel: 409,
     RetencaoJaLiberada: 409,
     RetencaoJaEfetivada: 409,
+}
+
+# Erros de roteamento (gerados pelo próprio framework), no mesmo formato dos de negócio.
+ERROS_HTTP: dict[int, tuple[str, str]] = {
+    404: ("ROTA_NAO_ENCONTRADA", "Rota não encontrada"),
+    405: ("METODO_NAO_PERMITIDO", "Método HTTP não permitido para esta rota"),
 }
 
 DESCRICAO = """
@@ -72,6 +79,7 @@ def criar_app(caminho_banco: str | Path | None = None, sincronizar_disco: bool =
     app.include_router(router)
     app.add_exception_handler(ErroDominio, _tratar_erro_de_dominio)
     app.add_exception_handler(RequestValidationError, _tratar_requisicao_invalida)
+    app.add_exception_handler(StarletteHTTPException, _tratar_erro_http)
     return app
 
 
@@ -94,4 +102,17 @@ async def _tratar_requisicao_invalida(
             "mensagem": "Os dados enviados não seguem o contrato da API",
             "detalhes": jsonable_encoder(erro.errors()),
         },
+    )
+
+
+async def _tratar_erro_http(request: Request, erro: StarletteHTTPException) -> JSONResponse:
+    """Rota inexistente (404), método errado (405) etc. também saem como {codigo, mensagem}.
+
+    Os cabeçalhos do erro são mantidos: no 405, o `Allow` informa os métodos aceitos.
+    """
+    codigo, mensagem = ERROS_HTTP.get(erro.status_code, ("ERRO_HTTP", str(erro.detail)))
+    return JSONResponse(
+        status_code=erro.status_code,
+        content={"codigo": codigo, "mensagem": mensagem},
+        headers=erro.headers,
     )

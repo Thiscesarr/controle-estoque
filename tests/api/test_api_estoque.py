@@ -98,6 +98,26 @@ class TestFormatoDosErros:
         assert corpo["detalhes"][0]["loc"] == ["body", "quantidade"]
 
 
+class TestErrosDeRoteamento:
+    """Erros gerados pelo framework também seguem o contrato {codigo, mensagem}."""
+
+    def test_rota_inexistente(self, cliente: TestClient) -> None:
+        resposta = cliente.get("/rota-que-nao-existe")
+
+        assert resposta.status_code == 404
+        assert resposta.json() == {
+            "codigo": "ROTA_NAO_ENCONTRADA",
+            "mensagem": "Rota não encontrada",
+        }
+
+    def test_metodo_nao_permitido_informa_os_metodos_aceitos(self, cliente: TestClient) -> None:
+        resposta = cliente.get("/produtos/NB-001/saidas")  # a rota só aceita POST
+
+        assert resposta.status_code == 405
+        assert resposta.json()["codigo"] == "METODO_NAO_PERMITIDO"
+        assert resposta.headers["allow"] == "POST"
+
+
 class TestStatusHttp:
     def test_produto_inexistente_responde_404(self, cliente: TestClient) -> None:
         for rota in ("/produtos/NAO-EXISTE", "/produtos/NAO-EXISTE/movimentacoes"):
