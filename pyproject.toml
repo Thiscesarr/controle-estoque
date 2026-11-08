@@ -27,6 +27,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+filterwarnings = [
+    # O Starlette 1.10+ prefere o pacote httpx2 no TestClient e avisa quando encontra o httpx.
+    # Mantemos o httpx porque ele funciona tanto com versões antigas quanto novas do FastAPI.
+    # O aviso (StarletteDeprecationWarning) herda de UserWarning.
+    "ignore:Using `httpx` with `starlette.testclient`:UserWarning",
+]
 
 [tool.ruff]
 line-length = 100
