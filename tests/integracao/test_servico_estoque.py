@@ -52,6 +52,15 @@ class TestCadastroEConsulta:
         with pytest.raises(DadoInvalido):
             servico.cadastrar_produto("NB 001", "Notebook X")
 
+    def test_sku_nao_diferencia_maiusculas_de_minusculas(self, servico: ServicoEstoque) -> None:
+        criado = servico.cadastrar_produto("nb-001", "Notebook X")
+        servico.registrar_entrada("Nb-001", 4)
+
+        assert criado.produto.sku == "NB-001"  # guardado em maiúsculas
+        assert saldo(servico, "nb-001") == (4, 4, 0, 0)
+        with pytest.raises(ProdutoJaCadastrado):
+            servico.cadastrar_produto("NB-001", "Duplicado")
+
     def test_consultar_produto_inexistente(self, servico: ServicoEstoque) -> None:
         with pytest.raises(ProdutoNaoEncontrado):
             servico.consultar("NAO-EXISTE")

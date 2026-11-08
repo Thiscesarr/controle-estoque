@@ -24,6 +24,7 @@ from estoque.domain.models import (
     StatusRetencao,
     TipoMovimentacao,
     TipoRetencao,
+    normalizar_sku,
     validar_quantidade,
     validar_sku,
     validar_texto,
@@ -77,10 +78,12 @@ class ServicoEstoque:
             return self._situacao(repositorio, produto.sku)
 
     def consultar(self, sku: str) -> SituacaoProduto:
+        sku = normalizar_sku(sku)
         with self._banco.leitura() as conexao:
             return self._situacao(RepositorioEstoque(conexao), sku)
 
     def listar_movimentacoes(self, sku: str) -> list[Movimentacao]:
+        sku = normalizar_sku(sku)
         with self._banco.leitura() as conexao:
             repositorio = RepositorioEstoque(conexao)
             self._situacao(repositorio, sku)  # produto inexistente -> ProdutoNaoEncontrado
@@ -89,6 +92,7 @@ class ServicoEstoque:
     # ----------------------------------------------------------- entrada e saída
 
     def registrar_entrada(self, sku: str, quantidade: int) -> SituacaoProduto:
+        sku = normalizar_sku(sku)
         quantidade = validar_quantidade(quantidade)
         with self._banco.escrita() as conexao:
             repositorio = RepositorioEstoque(conexao)
@@ -100,6 +104,7 @@ class ServicoEstoque:
             return self._situacao(repositorio, sku)
 
     def registrar_saida(self, sku: str, quantidade: int) -> SituacaoProduto:
+        sku = normalizar_sku(sku)
         quantidade = validar_quantidade(quantidade)
         with self._banco.escrita() as conexao:
             repositorio = RepositorioEstoque(conexao)
@@ -173,6 +178,7 @@ class ServicoEstoque:
         motivo: str | None,
     ) -> Retencao:
         """Reservar e bloquear são a mesma operação; só muda o tipo da retenção."""
+        sku = normalizar_sku(sku)
         quantidade = validar_quantidade(quantidade)
         solicitacao_id = validar_texto(solicitacao_id, "solicitacao_id")
         motivo = None if motivo is None else validar_texto(motivo, "motivo")

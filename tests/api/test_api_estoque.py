@@ -129,6 +129,14 @@ class TestStatusHttp:
         resposta = cliente.post("/produtos/NAO-EXISTE/entradas", json={"quantidade": 1})
         assert resposta.status_code == 404
 
+    def test_sku_em_minusculas_encontra_o_mesmo_produto(self, cliente: TestClient) -> None:
+        cadastrar(cliente)
+
+        resposta = cliente.get("/produtos/nb-001")
+
+        assert resposta.status_code == 200
+        assert resposta.json()["sku"] == "NB-001"
+
     def test_sku_duplicado_responde_409(self, cliente: TestClient) -> None:
         cadastrar(cliente, estoque=0)
         resposta = cliente.post("/produtos", json={"sku": "NB-001", "nome": "Outro"})

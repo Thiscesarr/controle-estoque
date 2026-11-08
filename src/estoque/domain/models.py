@@ -49,11 +49,20 @@ def validar_quantidade(quantidade: object) -> int:
     return quantidade
 
 
+def normalizar_sku(sku: str) -> str:
+    """SKU não diferencia maiúsculas de minúsculas: `nb-001` e `NB-001` são o mesmo produto.
+
+    O SKU é guardado e buscado sempre em maiúsculas. Só textos ASCII são convertidos, para
+    que um caractere especial nunca "vire" outro SKU válido ao passar por `upper()`.
+    """
+    return sku.upper() if sku.isascii() else sku
+
+
 def validar_sku(sku: object) -> str:
-    """Garante que o SKU segue o formato aceito (ver `PADRAO_SKU`)."""
+    """Garante que o SKU segue o formato aceito (ver `PADRAO_SKU`) e o devolve normalizado."""
     if not isinstance(sku, str) or re.fullmatch(PADRAO_SKU, sku) is None:
         raise DadoInvalido("sku", "use de 1 a 50 caracteres entre letras, números, '.', '-' e '_'")
-    return sku
+    return normalizar_sku(sku)
 
 
 def validar_texto(valor: object, campo: str) -> str:

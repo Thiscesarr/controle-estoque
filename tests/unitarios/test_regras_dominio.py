@@ -23,6 +23,7 @@ from estoque.domain.models import (
     SaldoEstoque,
     StatusRetencao,
     TipoRetencao,
+    normalizar_sku,
     validar_quantidade,
     validar_sku,
     validar_texto,
@@ -72,8 +73,15 @@ class TestValidarQuantidade:
 
 class TestValidarSku:
     @pytest.mark.parametrize("sku", ["NB-001", "a", "SKU_123.v2", "X" * 50])
-    def test_aceita_formatos_validos(self, sku: str) -> None:
-        assert validar_sku(sku) == sku
+    def test_aceita_formatos_validos_e_devolve_em_maiusculas(self, sku: str) -> None:
+        assert validar_sku(sku) == sku.upper()
+
+    def test_normalizar_sku_nao_diferencia_maiusculas(self) -> None:
+        assert normalizar_sku("nb-001") == normalizar_sku("Nb-001") == "NB-001"
+
+    def test_normalizar_sku_nao_altera_texto_com_caracteres_especiais(self) -> None:
+        # "ﬀ" (ligadura) viraria "FF" com upper(); um SKU inválido não pode virar um válido.
+        assert normalizar_sku("ﬀ") == "ﬀ"
 
     @pytest.mark.parametrize(
         "sku",
