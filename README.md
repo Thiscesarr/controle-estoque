@@ -16,8 +16,8 @@ fique inconsistente, inclusive com várias operações acontecendo ao mesmo temp
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Estratégia de testes](#estratégia-de-testes)
 - [Em produção, o que eu faria diferente](#em-produção-o-que-eu-faria-diferente)
-- [Uso de IA](#uso-de-ia)
 - [Visão de engenharia: 5 aspectos mais importantes](#visão-de-engenharia-5-aspectos-mais-importantes)
+- [Uso de IA](#uso-de-ia)
 
 ---
 
@@ -87,59 +87,57 @@ Todo erro tem o mesmo formato:
 - Python **3.11 ou superior**
 - Git
 
+Os comandos abaixo são para o **Prompt de Comando (CMD) do Windows**. Em Linux/macOS, a única
+diferença é a ativação do ambiente virtual: `source .venv/bin/activate`.
+
 ### 1. Clonar e preparar o ambiente
 
-```bash
+```bat
 git clone https://github.com/Thiscesarr/controle-estoque.git
 cd controle-estoque
 python -m venv .venv
-```
-
-Ativar o ambiente virtual:
-
-```bash
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-# Linux/macOS
-source .venv/bin/activate
-```
-
-Instalar o projeto com as ferramentas de desenvolvimento:
-
-```bash
+.venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
+O `activate` faz o prompt passar a mostrar `(.venv)`: os comandos seguintes usam as
+bibliotecas do projeto.
+
 ### 2. Subir a API
 
-```bash
+```bat
 uvicorn estoque.main:app --reload
 ```
 
 - Documentação interativa (Swagger): **http://localhost:8000/docs**. Cada rota tem o botão
   *Try it out* para testar direto pelo navegador.
 - O banco é o arquivo `estoque.db`, criado automaticamente na pasta atual. Para usar outro
-  caminho, defina a variável de ambiente `ESTOQUE_DB`.
+  caminho, defina a variável de ambiente antes de subir a API:
+  `set ESTOQUE_DB=C:\caminho\outro.db`
 
 ### 3. Exemplo pelo terminal
 
-> No Windows PowerShell, use `curl.exe` no lugar de `curl`.
+Com a API rodando, em **outro** CMD:
 
-```bash
-curl -X POST localhost:8000/produtos -H "Content-Type: application/json" -d '{"sku": "NB-001", "nome": "Notebook X"}'
-curl -X POST localhost:8000/produtos/NB-001/entradas -H "Content-Type: application/json" -d '{"quantidade": 10}'
-curl -X POST localhost:8000/produtos/NB-001/reservas -H "Content-Type: application/json" -d '{"quantidade": 3, "solicitacao_id": "PED-1"}'
-curl localhost:8000/produtos/NB-001
+```bat
+curl -X POST http://localhost:8000/produtos -H "Content-Type: application/json" -d "{\"sku\": \"NB-001\", \"nome\": \"Notebook X\"}"
+curl -X POST http://localhost:8000/produtos/NB-001/entradas -H "Content-Type: application/json" -d "{\"quantidade\": 10}"
+curl -X POST http://localhost:8000/produtos/NB-001/reservas -H "Content-Type: application/json" -d "{\"quantidade\": 3, \"solicitacao_id\": \"PED-1\"}"
+curl http://localhost:8000/produtos/NB-001
 ```
+
+> No CMD, o JSON vai entre aspas duplas, e as aspas internas são escritas como `\"`.
 
 ### 4. Rodar os testes e as verificações
 
-```bash
-pytest                                   # todos os testes
-pytest --cov=estoque                     # com relatório de cobertura
-ruff check .                             # lint
-ruff format --check .                    # formatação
+```bat
+pytest
+pytest --cov=estoque --cov-report=term-missing
+ruff check .
+ruff format --check .
 ```
+
+Respectivamente: todos os testes, testes com relatório de cobertura, lint e formatação.
 
 ---
 
@@ -319,14 +317,6 @@ mantida.
 
 ---
 
-## Uso de IA
-
-O desenvolvimento foi feito com o **Claude** (Anthropic), usado como par de programação. Os
-principais prompts, onde a IA mais ajudou, o que modifiquei e os erros identificados estão
-em [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
-
----
-
 ## Visão de engenharia: 5 aspectos mais importantes
 
 1. **Consistência transacional.** Cada operação é atômica: ou acontece por inteiro (estoque
@@ -344,3 +334,17 @@ em [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
 5. **Baixo acoplamento e contratos estáveis.** Domínio isolado, erros com código estável e
    API documentada permitem evoluir (novas regras, outro banco, outro canal de entrada) sem
    reescrever o sistema nem quebrar quem já o utiliza.
+
+---
+
+## Uso de IA
+
+- **Ferramenta:** Claude (Anthropic), usado pelo Claude Code como par de programação.
+- **Em que etapas:** interpretação do case e planejamento, implementação incremental (um
+  commit por etapa, cada um com explicação do que mudou e por quê), levantamento de casos de
+  borda, escrita dos testes e da documentação.
+- **Como o resultado foi validado:** testes automatizados rodando no CI, teste de mutação
+  dos testes de concorrência, medição antes de decisões de desempenho e execução real da API.
+- **Exemplo de correção de rota:** a primeira versão usava o modo WAL do SQLite; a medição
+  mostrou que ele deixava cada operação mais lenta neste cenário, e a decisão foi revertida.
+- Prompts principais e análise detalhada: [`docs/USO_DE_IA.md`](docs/USO_DE_IA.md).
